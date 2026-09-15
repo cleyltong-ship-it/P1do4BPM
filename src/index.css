@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+@theme {
+  --font-mono: "JetBrains Mono", "Courier New", Courier, monospace;
+  --font-serif: "Georgia", serif;
+}
+
+:root {
+  --bg: #ecece9;
+  --ink: #1a1a1a;
+  --line: #d1d1cf;
+  --extra-accent: #2d3e2d; /* Military Green */
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.data-row {
+  border-bottom: 1px solid var(--line);
+}
+
+.data-row:hover {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+.col-header {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 0.7rem;
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}

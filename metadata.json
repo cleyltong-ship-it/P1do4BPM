@@ -1,0 +1,8 @@
+{
+  "name": "Gestor de Escala Militar",
+  "description": "Sistema integrado de gestão de efetivo e serviços extras com dashboard operacional e banco de dados militar.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
