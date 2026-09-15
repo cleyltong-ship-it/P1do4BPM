@@ -214,7 +214,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-ink flex flex-col font-sans selection:bg-emerald-950 selection:text-white">
+    <div className="min-h-screen bg-slate-50 text-ink flex flex-col font-sans selection:bg-blue-950 selection:text-white">
       {/* Top Main Navigation Bar */}
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-line shadow-2xs">
         <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 h-18 flex items-center justify-between gap-4">
@@ -223,15 +223,15 @@ export default function App() {
             onClick={() => setMainTab('dashboard')}
             className="flex items-center gap-3 cursor-pointer group"
           >
-            <div className="w-10 h-10 rounded-xl bg-emerald-950 text-white flex items-center justify-center shadow-md group-hover:scale-105 transition-all">
-              <ShieldCheck size={22} className="text-emerald-400" />
+            <div className="w-10 h-10 rounded-xl bg-blue-950 text-white flex items-center justify-center shadow-md group-hover:scale-105 transition-all">
+              <ShieldCheck size={22} className="text-blue-400" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-sm font-black tracking-tight text-ink uppercase">
                   4º BPM / CPMR
                 </span>
-                <span className="hidden sm:inline-block text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 font-bold">
+                <span className="hidden sm:inline-block text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-100 text-blue-900 font-bold">
                   Efetivo Ativo
                 </span>
               </div>
@@ -248,7 +248,7 @@ export default function App() {
               className={cn(
                 "flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer",
                 mainTab === 'dashboard'
-                  ? "bg-emerald-950 text-white shadow-xs"
+                  ? "bg-blue-950 text-white shadow-xs"
                   : "text-ink/60 hover:text-ink hover:bg-white/60"
               )}
             >
@@ -262,7 +262,7 @@ export default function App() {
               className={cn(
                 "flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer",
                 mainTab === 'efetivo'
-                  ? "bg-emerald-950 text-white shadow-xs"
+                  ? "bg-blue-950 text-white shadow-xs"
                   : "text-ink/60 hover:text-ink hover:bg-white/60"
               )}
             >
@@ -298,7 +298,7 @@ export default function App() {
               className={cn(
                 "flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer",
                 mainTab === 'ferias'
-                  ? "bg-emerald-950 text-white shadow-xs"
+                  ? "bg-blue-950 text-white shadow-xs"
                   : "text-ink/60 hover:text-ink hover:bg-white/60"
               )}
               title={`Férias no mês vigente (${currentMonthName}): ${feriasMesVigenteCount} militares`}
@@ -308,7 +308,7 @@ export default function App() {
               {feriasMesVigenteCount > 0 && (
                 <span className={cn(
                   "text-[10px] font-mono px-1.5 py-0.2 rounded-full",
-                  mainTab === 'ferias' ? "bg-white/20 text-white" : "bg-emerald-100 text-emerald-900 font-bold"
+                  mainTab === 'ferias' ? "bg-white/20 text-white" : "bg-blue-100 text-blue-900 font-bold"
                 )}>
                   {feriasMesVigenteCount}
                 </span>
@@ -325,9 +325,9 @@ export default function App() {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="fixed top-20 right-6 z-50 bg-emerald-950 text-white px-4 py-3 rounded-2xl shadow-xl border border-emerald-700/50 flex items-center gap-3 text-xs font-medium"
+            className="fixed top-20 right-6 z-50 bg-blue-950 text-white px-4 py-3 rounded-2xl shadow-xl border border-blue-700/50 flex items-center gap-3 text-xs font-medium"
           >
-            <div className="w-6 h-6 rounded-full bg-emerald-500 text-emerald-950 flex items-center justify-center shrink-0">
+            <div className="w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center shrink-0">
               <CheckCircle2 size={16} />
             </div>
             <span>{toastMessage}</span>

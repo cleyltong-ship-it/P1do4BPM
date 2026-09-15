@@ -1,15 +1,6 @@
-import * as pdfjsLib from 'pdfjs-dist';
+import { pdfjsLib } from './pdfWorkerSetup';
 import { jsPDF } from 'jspdf';
 import { EfetivoMilitar, EscalaPdfResult, EscalaItemParsed, PostoGraduacao } from '../types';
-
-// Configure pdfjs worker
-try {
-  if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version || '5.7.284'}/build/pdf.worker.min.mjs`;
-  }
-} catch (e) {
-  console.warn('PDF.js worker initialization:', e);
-}
 
 // Clean text helper
 function cleanText(text: string): string {
@@ -372,7 +363,13 @@ export async function extractTextFromPdf(fileOrBuffer: File | ArrayBuffer): Prom
     arrayBuffer = fileOrBuffer;
   }
 
-  const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+  const loadingTask = pdfjsLib.getDocument({ 
+    data: arrayBuffer,
+    disableFontFace: true,
+    useSystemFonts: false,
+    // @ts-ignore
+    isEvalSupported: false 
+  });
   const pdf = await loadingTask.promise;
   let fullText = '';
 

@@ -1,20 +1,4 @@
-import * as pdfjsLib from 'pdfjs-dist';
-// @ts-ignore - Import the compiled worker module directly for bundler embedding
-import * as pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs';
-
-// Prepopulate the global object with the imported worker module.
-// In sandboxed iframes (like the AI Studio preview), Web Worker creation usually fails.
-// When that happens, PDF.js falls back to a "fake worker" (main-thread). If the workerSrc
-// is imported dynamically or fetched, it can crash or throw "Can't find variable: importScripts".
-// By registering the module directly on globalThis.pdfjsWorker, PDF.js's fake worker
-// setup immediately uses it without performing any dynamic imports, network requests, or evaluation.
-try {
-  (globalThis as any).pdfjsWorker = pdfjsWorker;
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@5.7.284/build/pdf.worker.min.mjs`;
-  console.log("PDFJS-Dist: globalThis.pdfjsWorker pre-registered successfully.");
-} catch (err) {
-  console.warn("Could not configure global PDF.js worker:", err);
-}
+import { pdfjsLib } from '../services/pdfWorkerSetup';
 
 export interface MilitaryPerson {
   rank: string;

@@ -1,16 +1,7 @@
 import * as XLSX from 'xlsx';
-import * as pdfjsLib from 'pdfjs-dist';
+import { pdfjsLib } from './pdfWorkerSetup';
 import { PrevisaoFerias, MesAno, PostoGraduacao, EfetivoMilitar } from '../types';
 import { normalizePosto } from './excelEfetivoParser';
-
-// Configure pdfjs worker if not already configured
-try {
-  if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version || '5.7.284'}/build/pdf.worker.min.mjs`;
-  }
-} catch (e) {
-  console.warn('PDF.js worker in ferias parser:', e);
-}
 
 export const MESES_DO_ANO: MesAno[] = [
   'Janeiro',
@@ -29,7 +20,32 @@ export const MESES_DO_ANO: MesAno[] = [
 
 export function normalizeMes(val: any): MesAno {
   if (!val) return 'Janeiro';
+
+  // If val is a number (could be 1-12 or Excel serial date)
+  if (typeof val === 'number') {
+    if (val >= 1 && val <= 12) {
+      return MESES_DO_ANO[Math.floor(val) - 1];
+    }
+    // Excel serial date (e.g. 45000 is around 2023)
+    if (val > 30000 && val < 60000) {
+      const date = new Date((val - 25569) * 86400 * 1000);
+      const monthIdx = date.getUTCMonth();
+      if (monthIdx >= 0 && monthIdx < 12) {
+        return MESES_DO_ANO[monthIdx];
+      }
+    }
+  }
+
   const str = String(val).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+
+  // If string contains date pattern DD/MM/AAAA or DD/MM
+  const dateMatch = str.match(/\b\d{1,2}[\/\.-](\d{1,2})([\/\.-]\d{2,4})?\b/);
+  if (dateMatch && dateMatch[1]) {
+    const monthNum = parseInt(dateMatch[1], 10);
+    if (monthNum >= 1 && monthNum <= 12) {
+      return MESES_DO_ANO[monthNum - 1];
+    }
+  }
 
   if (str.includes('JAN') || str === '1' || str === '01') return 'Janeiro';
   if (str.includes('FEV') || str === '2' || str === '02') return 'Fevereiro';
@@ -67,7 +83,9 @@ export interface ParseFeriasResult {
 }
 
 /**
- * Parse Excel file for vacation schedule
+ * Parse Excel file for vacation schedule with dual layout support:
+ * 1. Column-based annual matrix (JAN, FEV, MAR... columns)
+ * 2. Traditional row-list layout (Matricula, Nome, Mes column)
  */
 export async function parseExcelFerias(
   file: File,
@@ -89,7 +107,7 @@ export async function parseExcelFerias(
     const sheetMonth = normalizeMes(sheetName);
     const sheetIsMonth = sheetName.toUpperCase().includes(sheetMonth.toUpperCase().slice(0, 3));
 
-    // Find header row
+    // Find header row (inspect up to 35 rows for official battalion headers)
     let headerRowIndex = -1;
     let colMatricula = -1;
     let colNome = -1;
@@ -99,94 +117,128 @@ export async function parseExcelFerias(
     let colPeriodo = -1;
     let colSituacao = -1;
 
-    for (let r = 0; r < Math.min(10, jsonData.length); r++) {
-      const row = jsonData[r];
-      if (!Array.isArray(row)) continue;
+    // Track columns that represent individual months (e.g., JAN, FEV, MAR...)
+    const monthColumns = new Map<number, MesAno>();
 
-      let hasNameOrMat = false;
+    const maxHeaderScan = Math.min(35, jsonData.length);
+
+    for (let r = 0; r < maxHeaderScan; r++) {
+      const row = jsonData[r];
+      if (!Array.isArray(row) || row.length === 0) continue;
+
+      let detectedMat = -1;
+      let detectedNome = -1;
+      let detectedPosto = -1;
+      let detectedMes = -1;
+      let detectedDias = -1;
+      let detectedPeriodo = -1;
+      let detectedSituacao = -1;
+      const localMonthCols = new Map<number, MesAno>();
 
       row.forEach((cell, idx) => {
-        const norm = cleanStr(cell).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-        if (norm.includes('MATRICULA') || norm === 'MAT' || norm === 'ID') {
-          colMatricula = idx;
-          hasNameOrMat = true;
-        } else if (norm.includes('NOME') || norm.includes('MILITAR') || norm.includes('GUERRA')) {
-          colNome = idx;
-          hasNameOrMat = true;
-        } else if (norm.includes('POSTO') || norm.includes('GRAD') || norm === 'PG') {
-          colPosto = idx;
-        } else if (norm.includes('MES') || norm.includes('PREVISAO') || norm.includes('PERIODO') || norm.includes('MES DE FERIAS')) {
-          colMes = idx;
-        } else if (norm.includes('DIAS') || norm.includes('QTD')) {
-          colDias = idx;
-        } else if (norm.includes('STATUS') || norm.includes('SITUACAO')) {
-          colSituacao = idx;
+        const str = cleanStr(cell);
+        const norm = str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+
+        if (norm.includes('MATRICULA') || norm === 'MAT' || norm === 'ID' || norm === 'RE' || norm === 'RG') {
+          detectedMat = idx;
+        } else if (norm.includes('NOME') || norm.includes('MILITAR') || norm.includes('GUERRA') || norm === 'POLICIAL') {
+          detectedNome = idx;
+        } else if (norm.includes('POSTO') || norm.includes('GRAD') || norm === 'PG' || norm === 'P/G') {
+          detectedPosto = idx;
+        } else if (norm.includes('MES DE FERIAS') || norm.includes('PREVISAO') || norm === 'MES' || norm === 'PERIODO') {
+          detectedMes = idx;
+        } else if (norm.includes('DIAS') || norm.includes('QTD') || norm === 'DURACAO') {
+          detectedDias = idx;
+        } else if (norm.includes('STATUS') || norm.includes('SITUACAO') || norm === 'CONDICAO') {
+          detectedSituacao = idx;
+        } else if (norm.includes('DATA') || norm.includes('INICIO') || norm.includes('PERIODO')) {
+          detectedPeriodo = idx;
+        }
+
+        // Check if this header cell represents a month name
+        for (const m of MESES_DO_ANO) {
+          const mNorm = m.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+          const prefix = mNorm.slice(0, 3);
+          if (norm === prefix || norm === mNorm || norm.startsWith(`${prefix}/`) || norm.endsWith(`/${prefix}`)) {
+            localMonthCols.set(idx, m);
+            break;
+          }
         }
       });
 
-      if (hasNameOrMat) {
+      if ((detectedNome >= 0 || detectedMat >= 0) && (detectedMes >= 0 || localMonthCols.size >= 2 || detectedPosto >= 0 || sheetIsMonth)) {
         headerRowIndex = r;
+        colMatricula = detectedMat;
+        colNome = detectedNome;
+        colPosto = detectedPosto;
+        colMes = detectedMes;
+        colDias = detectedDias;
+        colPeriodo = detectedPeriodo;
+        colSituacao = detectedSituacao;
+        localMonthCols.forEach((m, idx) => monthColumns.set(idx, m));
         break;
       }
     }
 
-    // Process rows
-    const startRow = headerRowIndex >= 0 ? headerRowIndex + 1 : 0;
+    // Fallback: If header wasn't cleanly identified, scan for columns by data
+    if (headerRowIndex === -1) {
+      headerRowIndex = 0;
+    }
+
+    const startRow = headerRowIndex + 1;
+    const isMatrixMode = monthColumns.size >= 2;
 
     for (let r = startRow; r < jsonData.length; r++) {
       const row = jsonData[r];
       if (!Array.isArray(row) || row.length === 0) continue;
 
-      const rawNome = colNome >= 0 ? cleanStr(row[colNome]) : '';
-      const rawMat = colMatricula >= 0 ? cleanMatricula(row[colMatricula]) : '';
-      
-      // If row has neither name nor matricula, skip
+      let rawNome = colNome >= 0 ? cleanStr(row[colNome]) : '';
+      let rawMat = colMatricula >= 0 ? cleanMatricula(row[colMatricula]) : '';
+      let rawPosto = colPosto >= 0 ? cleanStr(row[colPosto]) : '';
+
+      // If columns were not mapped properly, attempt fuzzy column heuristic from row cells
+      if (!rawNome && !rawMat) {
+        row.forEach((cell, idx) => {
+          const s = cleanStr(cell);
+          if (!rawMat && /^\d{4,7}(-\d)?$/.test(s.replace(/\s/g, ''))) {
+            rawMat = cleanMatricula(s);
+          } else if (!rawNome && s.length > 5 && /[A-Z\s]{5,}/.test(s) && !/^\d+$/.test(s)) {
+            rawNome = s;
+          } else if (!rawPosto && /^(SD|CB|SGT|TEN|CAP|MAJ|CEL|SUBTEN)/i.test(s)) {
+            rawPosto = s;
+          }
+        });
+      }
+
+      // Skip row if still neither name nor matricula
       if (!rawNome && !rawMat) continue;
 
-      // Filter out headers repeated or titles
-      if (rawNome.toUpperCase().includes('NOME') || rawNome.toUpperCase().includes('TOTAL') || rawNome.toUpperCase().includes('BATALHAO')) {
+      // Filter out repeated headers or titles
+      const upperNome = rawNome.toUpperCase();
+      if (
+        upperNome.includes('NOME') || 
+        upperNome.includes('TOTAL') || 
+        upperNome.includes('BATALHAO') || 
+        upperNome.includes('POLICIA MILITAR') ||
+        upperNome.includes('RELATORIO')
+      ) {
         continue;
       }
-
-      // Determine month
-      let mes: MesAno = 'Janeiro';
-      if (colMes >= 0 && row[colMes]) {
-        mes = normalizeMes(row[colMes]);
-      } else if (sheetIsMonth) {
-        mes = sheetMonth;
-      } else {
-        // Try searching in all cells of this row for a month word
-        for (const cell of row) {
-          const str = cleanStr(cell).toUpperCase();
-          for (const m of MESES_DO_ANO) {
-            if (str.includes(m.toUpperCase().slice(0, 4))) {
-              mes = m;
-              break;
-            }
-          }
-        }
-      }
-
-      monthsFound.add(mes);
 
       // Match with existing military personnel database
       let matchedMilitar = efetivoList.find(m => 
         (rawMat && cleanMatricula(m.matricula) === rawMat) ||
-        (rawNome && m.nomeCompleto.toUpperCase().includes(rawNome.toUpperCase())) ||
-        (rawNome && m.nomeGuerra.toUpperCase().includes(rawNome.toUpperCase()))
+        (rawNome && m.nomeCompleto.toUpperCase().includes(upperNome)) ||
+        (rawNome && upperNome.includes(m.nomeGuerra.toUpperCase()))
       );
 
-      const rawPosto = colPosto >= 0 ? cleanStr(row[colPosto]) : '';
       const posto: PostoGraduacao = matchedMilitar?.postoGraduacao || (rawPosto ? normalizePosto(rawPosto) : 'Sd');
       const nomeCompleto = matchedMilitar?.nomeCompleto || rawNome;
-      const nomeGuerra = matchedMilitar?.nomeGuerra || rawNome.split(' ')[0] || '';
+      const nomeGuerra = matchedMilitar?.nomeGuerra || (rawNome ? rawNome.split(' ')[0] : 'Militar');
       const matricula = matchedMilitar?.matricula || rawMat || `PM-${Math.floor(1000 + Math.random() * 9000)}`;
 
-      const rawDias = colDias >= 0 ? parseInt(String(row[colDias]), 10) : 30;
-      const periodoDias = isNaN(rawDias) ? 30 : rawDias;
-
       let situacao: PrevisaoFerias['situacao'] = 'Prevista';
-      if (colSituacao >= 0) {
+      if (colSituacao >= 0 && row[colSituacao]) {
         const s = cleanStr(row[colSituacao]).toLowerCase();
         if (s.includes('gozo') || s.includes('fruindo') || s.includes('andamento')) {
           situacao = 'Em Gozo';
@@ -197,6 +249,73 @@ export async function parseExcelFerias(
         }
       }
 
+      // CASE A: Matrix Mode (each month has its own column)
+      if (isMatrixMode) {
+        let hasAnyMonthAssigned = false;
+
+        monthColumns.forEach((mMonth, colIdx) => {
+          const val = row[colIdx];
+          if (val === null || val === undefined) return;
+          const strVal = cleanStr(val).toUpperCase();
+          if (!strVal || strVal === '-' || strVal === '0') return;
+
+          // If there is any mark: "X", "30", "15", dates, "SIM", "1", "OK"
+          hasAnyMonthAssigned = true;
+          monthsFound.add(mMonth);
+
+          let dias = 30;
+          const numVal = parseInt(strVal, 10);
+          if (!isNaN(numVal) && numVal > 0 && numVal <= 30) {
+            dias = numVal;
+          }
+
+          records.push({
+            id: `FERIAS-${matricula}-${mMonth}-${records.length + 1}`,
+            matricula,
+            nome: nomeCompleto,
+            nomeGuerra,
+            posto,
+            ano: currentYear,
+            mesPrevisto: mMonth,
+            periodoDias: dias,
+            situacao,
+            observacao: strVal !== 'X' && strVal !== String(dias) ? strVal : undefined
+          });
+        });
+
+        if (hasAnyMonthAssigned) {
+          continue;
+        }
+      }
+
+      // CASE B: Standard Row / List Mode (one month per row or sheet month)
+      let mes: MesAno = 'Janeiro';
+      let dias = colDias >= 0 && !isNaN(parseInt(String(row[colDias]), 10)) ? parseInt(String(row[colDias]), 10) : 30;
+
+      if (colMes >= 0 && row[colMes] !== undefined && row[colMes] !== null) {
+        mes = normalizeMes(row[colMes]);
+      } else if (sheetIsMonth) {
+        mes = sheetMonth;
+      } else if (colPeriodo >= 0 && row[colPeriodo]) {
+        mes = normalizeMes(row[colPeriodo]);
+      } else {
+        // Search cells in this row for month names or date strings
+        let found = false;
+        for (const cell of row) {
+          const str = cleanStr(cell).toUpperCase();
+          for (const m of MESES_DO_ANO) {
+            if (str.includes(m.toUpperCase().slice(0, 4))) {
+              mes = m;
+              found = true;
+              break;
+            }
+          }
+          if (found) break;
+        }
+      }
+
+      monthsFound.add(mes);
+
       records.push({
         id: `FERIAS-${matricula}-${mes}-${records.length + 1}`,
         matricula,
@@ -205,7 +324,7 @@ export async function parseExcelFerias(
         posto,
         ano: currentYear,
         mesPrevisto: mes,
-        periodoDias,
+        periodoDias: dias,
         situacao,
         observacao: colPeriodo >= 0 ? cleanStr(row[colPeriodo]) : undefined
       });
@@ -227,7 +346,7 @@ export async function parseExcelFerias(
 }
 
 /**
- * Parse PDF file for vacation schedule
+ * Parse PDF file for vacation schedule with robust worker and text extraction
  */
 export async function parsePdfFerias(
   file: File,
@@ -235,7 +354,17 @@ export async function parsePdfFerias(
   efetivoList: EfetivoMilitar[] = []
 ): Promise<ParseFeriasResult> {
   const buffer = await file.arrayBuffer();
-  const pdfDoc = await pdfjsLib.getDocument({ data: buffer }).promise;
+  
+  // Use robust parameters to prevent worker hang in preview or Firebase Hosting
+  const loadingTask = pdfjsLib.getDocument({ 
+    data: buffer,
+    disableFontFace: true,
+    useSystemFonts: false,
+    // @ts-ignore
+    isEvalSupported: false 
+  });
+  
+  const pdfDoc = await loadingTask.promise;
 
   const records: PrevisaoFerias[] = [];
   const monthsFound = new Set<string>();
@@ -271,20 +400,27 @@ export async function parsePdfFerias(
       // Check for month header in line
       for (const m of MESES_DO_ANO) {
         const mNorm = m.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-        if (normLine.includes(`MES DE ${mNorm}`) || normLine.includes(`MES: ${mNorm}`) || normLine.includes(`FERIAS - ${mNorm}`) || normLine.includes(`MES ${mNorm}`) || normLine === mNorm) {
+        if (
+          normLine.includes(`MES DE ${mNorm}`) || 
+          normLine.includes(`MES: ${mNorm}`) || 
+          normLine.includes(`FERIAS - ${mNorm}`) || 
+          normLine.includes(`MES ${mNorm}`) || 
+          normLine === mNorm ||
+          normLine.includes(`PLANO DE FERIAS - ${mNorm}`)
+        ) {
           currentContextMonth = m;
           monthsFound.add(m);
         }
       }
 
-      // Check if line contains a military rank or matricula or name
-      const hasRank = /CEL|TEN|MAJ|CAP|SUBTEN|SGT|CB|SD/i.test(normLine);
-      const hasMatricula = /\b\d{4,6}[-\s]?\d\b/.test(lineText);
+      // Check if line contains military rank or matricula or name
+      const hasRank = /\b(CEL|TEN-CEL|MAJ|CAP|1º TEN|2º TEN|SUBTEN|1º SGT|2º SGT|3º SGT|CB|SD)\b/i.test(normLine);
+      const hasMatricula = /\b\d{4,6}[-\s.]?\d\b/.test(lineText);
 
       if (hasRank || hasMatricula) {
         // Try extracting matricula
-        const matMatch = lineText.match(/\b\d{4,6}[-\s]?\d\b/);
-        const matricula = matMatch ? matMatch[0].replace(/\s/g, '') : '';
+        const matMatch = lineText.match(/\b\d{4,6}[-\s.]?\d\b/);
+        const matricula = matMatch ? matMatch[0].replace(/[\s.]/g, '') : '';
 
         // Extract rank
         const posto = normalizePosto(lineText);
@@ -297,7 +433,10 @@ export async function parsePdfFerias(
 
         // If no match by matricula, try matching by name parts
         if (!matchedMilitar) {
-          const words = normLine.split(/\s+/).filter(w => w.length > 3 && !['POLICIA', 'MILITAR', 'BATALHAO', 'FERIAS', 'ESTADO', 'PREVISAO', 'PLANO'].includes(w));
+          const words = normLine.split(/\s+/).filter(w => 
+            w.length > 3 && 
+            !['POLICIA', 'MILITAR', 'BATALHAO', 'FERIAS', 'ESTADO', 'PREVISAO', 'PLANO', 'QUADRO', 'DIAS'].includes(w)
+          );
           for (const m of efetivoList) {
             const mWords = m.nomeCompleto.toUpperCase().split(/\s+/);
             const common = words.filter(w => mWords.includes(w));
@@ -311,12 +450,12 @@ export async function parsePdfFerias(
         // Extract name
         let nome = matchedMilitar?.nomeCompleto || '';
         if (!nome) {
-          // Clean out rank and matricula to get the name
           let cleanedName = lineText
-            .replace(/\b\d{4,6}[-\s]?\d\b/, '')
+            .replace(/\b\d{4,6}[-\s.]?\d\b/, '')
             .replace(/\b(Cel|Ten-Cel|Maj|Cap|1º Ten|2º Ten|Subten|1º Sgt|2º Sgt|3º Sgt|Cb|Sd)\b/gi, '')
             .replace(/\b(Janeiro|Fevereiro|Março|Abril|Maio|Junho|Julho|Agosto|Setembro|Outubro|Novembro|Dezembro)\b/gi, '')
             .replace(/\b\d{1,2}\/\d{1,2}\/\d{4}\b/g, '')
+            .replace(/\b\d{1,2}\s*dias\b/gi, '')
             .trim();
           if (cleanedName.length > 3) {
             nome = cleanedName;
@@ -335,6 +474,13 @@ export async function parsePdfFerias(
           }
           monthsFound.add(rowMonth);
 
+          // Extract days if explicitly stated (e.g., "15 DIAS" or "30 DIAS")
+          let periodoDias = 30;
+          const daysMatch = lineText.match(/\b(10|15|20|30)\s*(dias|d)?\b/i);
+          if (daysMatch && daysMatch[1]) {
+            periodoDias = parseInt(daysMatch[1], 10);
+          }
+
           records.push({
             id: `FERIAS-PDF-${matricula || records.length}-${rowMonth}-${records.length + 1}`,
             matricula: matricula || matchedMilitar?.matricula || `PM-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -343,7 +489,7 @@ export async function parsePdfFerias(
             posto: matchedMilitar?.postoGraduacao || posto,
             ano: currentYear,
             mesPrevisto: rowMonth,
-            periodoDias: 30,
+            periodoDias,
             situacao: 'Prevista',
             observacao: 'Extraído do Boletim / PDF de Férias'
           });
