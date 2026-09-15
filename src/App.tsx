@@ -22,6 +22,7 @@ import {
   updateMilitar, 
   deleteMilitar, 
   resetEfetivoToDefault, 
+  clearAllEfetivo,
   importEfetivoReplace,
   importEfetivoMerge,
   calculateDashboardMetrics 
@@ -37,6 +38,7 @@ import {
   addPrevisaoFerias, 
   updatePrevisaoFerias, 
   deletePrevisaoFerias, 
+  clearAllFerias,
   importFeriasReplace, 
   importFeriasMerge 
 } from './services/feriasDatabase';
@@ -117,6 +119,17 @@ export default function App() {
   const handleResetDefault = () => {
     const res = resetEfetivoToDefault();
     handleEfetivoChange(res);
+  };
+
+  const handleClearAllEfetivo = (clearFeriasAlso: boolean = true) => {
+    const cleared = clearAllEfetivo();
+    handleEfetivoChange(cleared);
+    if (clearFeriasAlso) {
+      const clearedFerias = clearAllFerias();
+      handleFeriasChange(clearedFerias);
+    }
+    setToastMessage('Todo o banco de dados foi limpo com sucesso! (0 militares cadastrados)');
+    setTimeout(() => setToastMessage(null), 5000);
   };
 
   const handleImportEfetivo = (importedList: EfetivoMilitar[], mode: 'replace' | 'merge') => {
@@ -374,6 +387,7 @@ export default function App() {
                 onUpdateMilitar={handleUpdateMilitar}
                 onDeleteMilitar={handleDeleteMilitar}
                 onResetDefault={handleResetDefault}
+                onClearAllEfetivo={handleClearAllEfetivo}
                 isAddModalOpen={isAddModalOpen}
                 setIsAddModalOpen={setIsAddModalOpen}
                 onOpenImportModal={() => setIsImportModalOpen(true)}
@@ -421,6 +435,7 @@ export default function App() {
         onClose={() => setIsImportModalOpen(false)}
         onImport={handleImportEfetivo}
         currentEfetivoCount={efetivo.length}
+        onClearAll={handleClearAllEfetivo}
       />
 
       {/* Import Escala PDF Modal */}

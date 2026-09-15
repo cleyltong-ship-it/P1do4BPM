@@ -55,9 +55,9 @@ export function generateDefaultFerias(efetivo: EfetivoMilitar[]): PrevisaoFerias
 export function getPrevisaoFerias(efetivoRef: EfetivoMilitar[] = []): PrevisaoFerias[] {
   try {
     const raw = localStorage.getItem(FERIAS_STORAGE_KEY);
-    if (raw) {
+    if (raw !== null) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         return parsed;
       }
     }
@@ -66,9 +66,14 @@ export function getPrevisaoFerias(efetivoRef: EfetivoMilitar[] = []): PrevisaoFe
   }
 
   // If not stored yet, initialize defaults from current efetivo
-  const defaults = generateDefaultFerias(efetivoRef);
-  savePrevisaoFerias(defaults);
-  return defaults;
+  if (efetivoRef && efetivoRef.length > 0) {
+    const defaults = generateDefaultFerias(efetivoRef);
+    savePrevisaoFerias(defaults);
+    return defaults;
+  }
+
+  savePrevisaoFerias([]);
+  return [];
 }
 
 /**
@@ -80,6 +85,14 @@ export function savePrevisaoFerias(records: PrevisaoFerias[]): void {
   } catch (e) {
     console.error('Error saving ferias to localStorage:', e);
   }
+}
+
+/**
+ * Clear all vacation records
+ */
+export function clearAllFerias(): PrevisaoFerias[] {
+  savePrevisaoFerias([]);
+  return [];
 }
 
 /**

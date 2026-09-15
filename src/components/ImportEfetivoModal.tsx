@@ -11,7 +11,8 @@ import {
   ArrowRight,
   RefreshCw,
   Eye,
-  Check
+  Check,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { EfetivoMilitar } from '../types';
@@ -23,6 +24,7 @@ interface ImportEfetivoModalProps {
   onClose: () => void;
   onImport: (newEfetivo: EfetivoMilitar[], mode: 'replace' | 'merge') => void;
   currentEfetivoCount: number;
+  onClearAll?: (clearFerias: boolean) => void;
 }
 
 export const ImportEfetivoModal: React.FC<ImportEfetivoModalProps> = ({
@@ -30,6 +32,7 @@ export const ImportEfetivoModal: React.FC<ImportEfetivoModalProps> = ({
   onClose,
   onImport,
   currentEfetivoCount,
+  onClearAll,
 }) => {
   const [isHovering, setIsHovering] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
@@ -91,16 +94,16 @@ export const ImportEfetivoModal: React.FC<ImportEfetivoModalProps> = ({
         className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-line overflow-hidden my-6"
       >
         {/* Modal Header */}
-        <div className="p-6 bg-gradient-to-r from-emerald-950 to-slate-900 text-white flex items-center justify-between">
+        <div className="p-6 bg-gradient-to-r from-blue-950 via-slate-900 to-blue-900 text-white flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center border border-blue-500/30">
               <FileSpreadsheet size={22} />
             </div>
             <div>
               <h3 className="text-lg font-bold text-white tracking-tight">
                 Importar Planilha de Efetivo Militar
               </h3>
-              <p className="text-xs text-emerald-200/80 font-sans">
+              <p className="text-xs text-blue-200/80 font-sans">
                 Carregue uma planilha Excel (.xlsx, .xls) para atualizar todo o efetivo e alimentar o Dashboard.
               </p>
             </div>
@@ -115,17 +118,41 @@ export const ImportEfetivoModal: React.FC<ImportEfetivoModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-6 space-y-5">
+          {/* Clear database alert if populated */}
+          {currentEfetivoCount > 0 && onClearAll && !parseResult && (
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 bg-rose-50 rounded-xl border border-rose-200 text-xs">
+              <div className="flex items-center gap-2 text-rose-950">
+                <Trash2 size={16} className="shrink-0 text-rose-600" />
+                <span>
+                  O banco possui atualmente <strong>{currentEfetivoCount} militares</strong>. Se preferir zerar a lista antes de uma nova importação:
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm(`Deseja realmente apagar todos os ${currentEfetivoCount} militares do banco de dados agora? O sistema ficará com 0 militares.`)) {
+                    onClearAll(true);
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold text-xs transition-all shrink-0 cursor-pointer shadow-xs"
+              >
+                <Trash2 size={13} />
+                Limpar Banco Agora
+              </button>
+            </div>
+          )}
+
           {/* Quick template download info */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 bg-emerald-50 rounded-xl border border-emerald-200/70 text-xs">
-            <div className="flex items-center gap-2 text-emerald-950">
-              <Users size={16} className="shrink-0 text-emerald-700" />
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 bg-blue-50 rounded-xl border border-blue-200/70 text-xs">
+            <div className="flex items-center gap-2 text-blue-950">
+              <Users size={16} className="shrink-0 text-blue-700" />
               <span>
                 Precisa de um modelo com as colunas certas? Baixe o arquivo de exemplo padrão do 4º BPM.
               </span>
             </div>
             <button
               onClick={downloadModeloExcelEfetivo}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-900 hover:bg-emerald-800 text-white rounded-lg font-semibold text-xs transition-all shrink-0 cursor-pointer shadow-xs"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-950 hover:bg-blue-900 text-white rounded-lg font-semibold text-xs transition-all shrink-0 cursor-pointer shadow-xs"
             >
               <FileDown size={14} />
               Baixar Modelo (.xlsx)
@@ -143,8 +170,8 @@ export const ImportEfetivoModal: React.FC<ImportEfetivoModalProps> = ({
                 className={cn(
                   "border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all",
                   isHovering 
-                    ? "border-emerald-600 bg-emerald-500/5 scale-[1.01]" 
-                    : "border-line bg-slate-50/50 hover:bg-slate-50 hover:border-emerald-950/30",
+                    ? "border-blue-600 bg-blue-500/5 scale-[1.01]" 
+                    : "border-line bg-slate-50/50 hover:bg-slate-50 hover:border-blue-950/30",
                   isParsing && "opacity-50 pointer-events-none"
                 )}
               >

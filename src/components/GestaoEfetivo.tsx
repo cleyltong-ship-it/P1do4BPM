@@ -29,6 +29,7 @@ interface GestaoEfetivoProps {
   onUpdateMilitar: (id: string, updates: Partial<EfetivoMilitar>) => void;
   onDeleteMilitar: (id: string) => void;
   onResetDefault: () => void;
+  onClearAllEfetivo: (clearFerias: boolean) => void;
   isAddModalOpen: boolean;
   setIsAddModalOpen: (open: boolean) => void;
   onOpenImportModal: () => void;
@@ -74,6 +75,7 @@ export const GestaoEfetivo: React.FC<GestaoEfetivoProps> = ({
   onUpdateMilitar,
   onDeleteMilitar,
   onResetDefault,
+  onClearAllEfetivo,
   isAddModalOpen,
   setIsAddModalOpen,
   onOpenImportModal,
@@ -81,6 +83,8 @@ export const GestaoEfetivo: React.FC<GestaoEfetivoProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterSituacao, setFilterSituacao] = useState<string>('TODAS');
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [clearFeriasChecked, setClearFeriasChecked] = useState(true);
 
   // Edit Modal State
   const [editingMilitar, setEditingMilitar] = useState<EfetivoMilitar | null>(null);
@@ -182,7 +186,7 @@ export const GestaoEfetivo: React.FC<GestaoEfetivoProps> = ({
       <div className="bg-white p-6 rounded-2xl border border-line shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-emerald-950 text-white flex items-center justify-center">
+            <div className="w-9 h-9 rounded-xl bg-blue-950 text-white flex items-center justify-center">
               <Users size={18} />
             </div>
             <h2 className="text-xl font-bold text-ink">
@@ -204,17 +208,25 @@ export const GestaoEfetivo: React.FC<GestaoEfetivoProps> = ({
           </button>
           <button
             onClick={onOpenImportModal}
-            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-950 hover:bg-emerald-900 text-white rounded-xl text-xs font-semibold shadow-xs transition-all cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2.5 bg-blue-950 hover:bg-blue-900 text-white rounded-xl text-xs font-semibold shadow-xs transition-all cursor-pointer"
           >
             <FileSpreadsheet size={15} />
             Importar Excel
           </button>
           <button
             onClick={() => setIsAddModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-all cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2.5 bg-blue-800 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-all cursor-pointer"
           >
             <UserPlus size={15} />
             Novo Militar
+          </button>
+          <button
+            onClick={() => setIsClearModalOpen(true)}
+            title="Limpar toda a lista e zerar o banco de dados (0 militares)"
+            className="flex items-center gap-1.5 px-3 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-semibold shadow-xs transition-all cursor-pointer"
+          >
+            <Trash2 size={14} className="text-rose-600" />
+            Limpar Todo Efetivo
           </button>
           <button
             onClick={downloadModeloExcelEfetivo}
@@ -251,12 +263,12 @@ export const GestaoEfetivo: React.FC<GestaoEfetivoProps> = ({
           <span className="text-ink/60 font-mono text-[11px]">Efetivo Total:</span>
           <span className="font-bold font-mono text-ink text-sm">{efetivo.length}</span>
         </div>
-        <div className="bg-emerald-50 p-3.5 rounded-2xl border border-emerald-200 shadow-2xs flex items-center justify-between">
-          <span className="text-emerald-900 font-mono text-[11px] font-semibold flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
+        <div className="bg-blue-50 p-3.5 rounded-2xl border border-blue-200 shadow-2xs flex items-center justify-between">
+          <span className="text-blue-900 font-mono text-[11px] font-semibold flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
             Em Escala (Postos):
           </span>
-          <span className="font-black font-mono text-emerald-950 text-sm">
+          <span className="font-black font-mono text-blue-950 text-sm">
             {efetivo.filter(m => isEmEscala(m.situacao)).length}
           </span>
         </div>
@@ -423,12 +435,102 @@ export const GestaoEfetivo: React.FC<GestaoEfetivoProps> = ({
           ))}
 
           {filteredEfetivo.length === 0 && (
-            <div className="p-12 text-center text-ink/50 text-xs italic">
-              Nenhum militar encontrado com os filtros selecionados.
+            <div className="p-12 text-center text-ink/50 text-xs">
+              {efetivo.length === 0 ? (
+                <div className="max-w-md mx-auto space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-900 border border-blue-200 flex items-center justify-center mx-auto">
+                    <Users size={24} />
+                  </div>
+                  <h4 className="text-sm font-bold text-ink">Banco de Dados Vazio (0 Militares)</h4>
+                  <p className="text-xs text-ink/60">
+                    Nenhum militar cadastrado no sistema. A lista anterior foi limpa com sucesso. Você pode importar sua planilha Excel com o efetivo ou restaurar a base original de demonstração.
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                    <button
+                      onClick={onOpenImportModal}
+                      className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-950 hover:bg-blue-900 text-white rounded-xl text-xs font-bold cursor-pointer"
+                    >
+                      <FileSpreadsheet size={14} />
+                      Importar Excel
+                    </button>
+                    <button
+                      onClick={onResetDefault}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-ink rounded-xl text-xs font-semibold cursor-pointer"
+                    >
+                      <RotateCcw size={14} />
+                      Restaurar Padrão
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <span className="italic">Nenhum militar encontrado com os filtros selecionados.</span>
+              )}
             </div>
           )}
         </div>
       </div>
+
+      {/* Modal: Confirmar Limpeza Total do Banco */}
+      {isClearModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-line space-y-4 my-8">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                <AlertCircle size={22} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-ink">
+                  Limpar Todo o Banco de Dados?
+                </h3>
+                <p className="text-xs text-ink/60 mt-1">
+                  Esta ação excluirá permanentemente todos os <strong>{efetivo.length} militares</strong> cadastrados ou importados anteriormente.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-900 space-y-1">
+              <span className="font-bold flex items-center gap-1.5">
+                <Trash2 size={13} className="text-rose-600" />
+                O sistema ficará com 0 militares
+              </span>
+              <p className="text-[11px] leading-relaxed opacity-90">
+                Toda a lista atual será esvaziada. Você poderá em seguida realizar uma nova importação limpa via planilha Excel ou PDF.
+              </p>
+            </div>
+
+            <label className="flex items-center gap-2 p-3 rounded-xl border border-line bg-slate-50 text-xs font-semibold text-ink cursor-pointer hover:bg-slate-100/70 transition-colors">
+              <input
+                type="checkbox"
+                checked={clearFeriasChecked}
+                onChange={(e) => setClearFeriasChecked(e.target.checked)}
+                className="w-4 h-4 rounded text-blue-900 focus:ring-blue-900"
+              />
+              <span>Limpar também a lista e previsões de férias vinculadas</span>
+            </label>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-line">
+              <button
+                type="button"
+                onClick={() => setIsClearModalOpen(false)}
+                className="px-4 py-2 border border-line rounded-xl text-xs font-semibold text-ink hover:bg-slate-50 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onClearAllEfetivo(clearFeriasChecked);
+                  setIsClearModalOpen(false);
+                }}
+                className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer"
+              >
+                <Trash2 size={14} />
+                Sim, Limpar Todo o Efetivo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal: Adicionar Novo Militar */}
       {isAddModalOpen && (

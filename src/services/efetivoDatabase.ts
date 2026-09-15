@@ -365,14 +365,17 @@ export const INITIAL_EFETIVO: EfetivoMilitar[] = [
 export function getEfetivo(): EfetivoMilitar[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
+    // Only initialize default data on the very first visit (when key does not exist at all)
+    if (raw === null) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_EFETIVO));
       return INITIAL_EFETIVO;
     }
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_EFETIVO));
-      return INITIAL_EFETIVO;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    if (parsed.length === 0) {
+      return [];
     }
     // Migration for legacy statuses (e.g. Pronto, De Serviço, Folga, Reserva de Armamento)
     const migrated = parsed.map((m: any) => {
@@ -387,7 +390,7 @@ export function getEfetivo(): EfetivoMilitar[] {
     return migrated;
   } catch (err) {
     console.error('Erro ao ler efetivo do localStorage:', err);
-    return INITIAL_EFETIVO;
+    return [];
   }
 }
 
@@ -397,6 +400,11 @@ export function saveEfetivo(data: EfetivoMilitar[]): void {
   } catch (err) {
     console.error('Erro ao salvar efetivo:', err);
   }
+}
+
+export function clearAllEfetivo(): EfetivoMilitar[] {
+  saveEfetivo([]);
+  return [];
 }
 
 export function addMilitar(militar: Omit<EfetivoMilitar, 'id'>): EfetivoMilitar {
