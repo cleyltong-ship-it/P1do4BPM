@@ -322,14 +322,17 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
         const nome = (item.nome || '').toLowerCase();
         const guerra = (item.nomeGuerra || '').toLowerCase();
         const posto = (item.posto || '').toLowerCase();
-        if (!mat.includes(term) && !nome.includes(term) && !guerra.includes(term) && !posto.includes(term)) {
+        // Buscar também pelo nome completo do militar cadastrado no efetivo
+        const m = efetivo.find(e => e.matricula && item.matricula && e.matricula.trim() === item.matricula.trim());
+        const nomeCompletoEfetivo = (m?.nomeCompleto || '').toLowerCase();
+        if (!mat.includes(term) && !nome.includes(term) && !nomeCompletoEfetivo.includes(term) && !guerra.includes(term) && !posto.includes(term)) {
           return false;
         }
       }
 
       return true;
     });
-  }, [ferias, selectedYear, selectedMonth, selectedStatus, searchTerm]);
+  }, [ferias, selectedYear, selectedMonth, selectedStatus, searchTerm, efetivo]);
 
   // Quick stats
   const totalAno = ferias.filter(f => f.ano === selectedYear).length;
@@ -623,10 +626,11 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
   };
 
   const handleOpenEdit = (item: PrevisaoFerias) => {
+    const m = efetivo.find(e => e.matricula && item.matricula && e.matricula.trim() === item.matricula.trim());
     setEditingItem(item);
     setFormMatricula(item.matricula);
-    setFormNome(item.nome);
-    setFormPosto(item.posto);
+    setFormNome(m?.nomeCompleto || item.nome);
+    setFormPosto(m?.postoGraduacao || item.posto);
     setFormMes(item.mesPrevisto as MesAno);
     setFormDias(item.periodoDias || 30);
     setFormDataInicio(item.dataInicio || '');
@@ -684,13 +688,13 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
   const handleExportExcel = () => {
     const data = filteredFerias.map((f, idx) => {
       const cruzamento = getCruzamentoMilitar(f, efetivo);
+      const nomeCompleto = cruzamento.militar?.nomeCompleto || f.nome;
       return {
         'Nº': idx + 1,
         'Ano': f.ano,
         'Mês Previsto': f.mesPrevisto,
-        'Posto/Grad': f.posto,
-        'Nome Completo': f.nome,
-        'Nome de Guerra': f.nomeGuerra || '',
+        'Posto/Grad': cruzamento.militar?.postoGraduacao || f.posto,
+        'Nome Completo': nomeCompleto,
         'Matrícula': f.matricula,
         'Setor na Escala': cruzamento.setorEscala,
         'Enquadramento': cruzamento.isNaoOperacional ? `Descontado (${cruzamento.categoriaNaoOperacional})` : 'Operacional de Rua',
@@ -730,11 +734,12 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
 
     const tableRows = filteredFerias.map((f, i) => {
       const cruzamento = getCruzamentoMilitar(f, efetivo);
+      const nomeCompleto = cruzamento.militar?.nomeCompleto || f.nome;
       return [
         String(i + 1),
         f.mesPrevisto,
-        f.posto,
-        f.nome,
+        cruzamento.militar?.postoGraduacao || f.posto,
+        nomeCompleto,
         f.matricula,
         cruzamento.setorEscala,
         cruzamento.isNaoOperacional ? `Desc. (${cruzamento.categoriaNaoOperacional})` : 'Operacional',
@@ -1369,7 +1374,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-line bg-slate-100/80 text-[11px] font-bold text-ink/70 uppercase tracking-wider">
-                  <th className="py-3 px-4">Posto / Militar</th>
+                  <th className="py-3 px-4">Posto / Nome Completo</th>
                   <th className="py-3 px-4">Setor na Escala / Cruzamento</th>
                   <th className="py-3 px-4">Matrícula</th>
                   <th className="py-3 px-4">Mês Previsto</th>
@@ -1381,20 +1386,17 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
               <tbody className="divide-y divide-line">
                 {filteredFerias.map((item) => {
                   const cruzamento = getCruzamentoMilitar(item, efetivo);
+                  const nomeCompleto = cruzamento.militar?.nomeCompleto || item.nome;
+                  const postoExibicao = cruzamento.militar?.postoGraduacao || item.posto;
                   return (
                   <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2.5">
                         <span className="w-14 shrink-0 font-mono font-bold text-emerald-950 bg-emerald-50 px-2 py-0.5 rounded text-center border border-emerald-200">
-                          {item.posto}
+                          {postoExibicao}
                         </span>
                         <div>
-                          <div className="font-bold text-ink">{item.nome}</div>
-                          {item.nomeGuerra && (
-                            <div className="text-[10px] text-ink/50 uppercase font-mono">
-                              GUERRA: {item.nomeGuerra}
-                            </div>
-                          )}
+                          <div className="font-bold text-ink">{nomeCompleto}</div>
                         </div>
                       </div>
                     </td>
