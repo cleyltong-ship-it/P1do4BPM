@@ -355,16 +355,40 @@ export async function parsePdfFerias(
 ): Promise<ParseFeriasResult> {
   const buffer = await file.arrayBuffer();
   
-  // Use robust parameters to prevent worker hang in preview or Firebase Hosting
-  const loadingTask = pdfjsLib.getDocument({ 
-    data: buffer,
-    disableFontFace: true,
-    useSystemFonts: false,
-    // @ts-ignore
-    isEvalSupported: false 
-  });
-  
-  const pdfDoc = await loadingTask.promise;
+  let pdfDoc: any = null;
+  let loadError: any = null;
+
+  try {
+    const loadingTask = pdfjsLib.getDocument({ 
+      data: buffer.slice(0),
+      disableFontFace: true,
+      useSystemFonts: false,
+      // @ts-ignore
+      isEvalSupported: false 
+    });
+    pdfDoc = await loadingTask.promise;
+  } catch (err: any) {
+    console.warn('Tentativa 1 no PDF de férias falhou, tentando fallback CDN...', err);
+    loadError = err;
+    try {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version || '5.7.284'}/build/pdf.worker.min.mjs`;
+      const fallbackTask = pdfjsLib.getDocument({ 
+        data: buffer.slice(0),
+        disableFontFace: true,
+        useSystemFonts: false,
+        // @ts-ignore
+        isEvalSupported: false 
+      });
+      pdfDoc = await fallbackTask.promise;
+    } catch (err2: any) {
+      console.warn('Tentativa 2 no PDF de férias falhou:', err2);
+      loadError = err2;
+    }
+  }
+
+  if (!pdfDoc) {
+    throw new Error(`Falha ao ler arquivo PDF de férias: ${loadError?.message || 'arquivo ilegível ou protegido'}`);
+  }
 
   const records: PrevisaoFerias[] = [];
   const monthsFound = new Set<string>();

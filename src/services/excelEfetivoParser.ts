@@ -178,31 +178,79 @@ export interface ParseExcelResult {
 export async function parseEfetivoExcel(file: File): Promise<ParseExcelResult> {
   const data = await file.arrayBuffer();
   const workbook = XLSX.read(data, { type: 'array', cellDates: true });
-  const sheetName = workbook.SheetNames[0];
-  const worksheet = workbook.Sheets[sheetName];
 
-  const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as any[][];
-
-  if (!rawRows || rawRows.length === 0) {
-    throw new Error('A planilha está vazia.');
+  if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+    throw new Error('O arquivo enviado não contém planilhas válidas.');
   }
 
-  // Find header row: look for row containing keywords like MATRICULA, POSTO, NOME, GRADUACAO
-  let headerRowIndex = -1;
-  for (let r = 0; r < Math.min(rawRows.length, 15); r++) {
-    const row = rawRows[r];
-    const rowStr = row.map(c => normalizeHeader(String(c))).join(' ');
-    if (
-      (rowStr.includes('MATRICULA') || rowStr.includes('POSTO') || rowStr.includes('GRADUACAO') || rowStr.includes('GUERRA')) &&
-      (rowStr.includes('NOME') || rowStr.includes('MILITAR') || rowStr.includes('COMPLETO'))
-    ) {
-      headerRowIndex = r;
-      break;
+  // Smart sheet selector: pick the sheet with the most content or containing personnel keywords
+  let selectedSheetName = workbook.SheetNames[0];
+  let bestSheetRows: any[][] = [];
+  let highestScore = -1;
+
+  for (const sName of workbook.SheetNames) {
+    const ws = workbook.Sheets[sName];
+    if (!ws) continue;
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as any[][];
+    if (!rows || rows.length === 0) continue;
+
+    let score = rows.length;
+    // Boost score if sheet name hints at personnel
+    const sNorm = sName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    if (sNorm.includes('EFETIVO') || sNorm.includes('MILITAR') || sNorm.includes('GERAL') || sNorm.includes('BATALHAO')) {
+      score += 500;
+    }
+    if (score > highestScore) {
+      highestScore = score;
+      selectedSheetName = sName;
+      bestSheetRows = rows;
     }
   }
 
-  // If no specific header found, assume row 0 is header
-  if (headerRowIndex === -1) {
+  const rawRows = bestSheetRows;
+  if (!rawRows || rawRows.length === 0) {
+    throw new Error('A planilha selecionada está vazia ou não possui linhas legíveis.');
+  }
+
+  // Intelligently find header row (inspect up to 45 rows for official battalion headers)
+  let headerRowIndex = -1;
+  let bestHeaderScore = 0;
+  const maxHeaderScan = Math.min(rawRows.length, 45);
+
+  for (let r = 0; r < maxHeaderScan; r++) {
+    const row = rawRows[r];
+    if (!Array.isArray(row) || row.length === 0) continue;
+
+    let currentScore = 0;
+    row.forEach(cell => {
+      const norm = normalizeHeader(String(cell));
+      if (!norm) return;
+
+      if (norm.includes('MATRICULA') || norm === 'MAT' || norm === 'RE' || norm === 'RG' || norm === 'CADASTRO') {
+        currentScore += 3;
+      } else if (norm.includes('POSTO') || norm.includes('GRADUACAO') || norm === 'GRAD' || norm === 'PG' || norm === 'PG') {
+        currentScore += 3;
+      } else if (norm.includes('NOME') || norm.includes('GUERRA') || norm.includes('MILITAR') || norm.includes('POLICIAL')) {
+        currentScore += 3;
+      } else if (norm.includes('SITUACAO') || norm.includes('STATUS') || norm.includes('DESTINO') || norm.includes('LOTACAO') || norm.includes('CONDICAO')) {
+        currentScore += 2;
+      } else if (norm.includes('FUNCAO') || norm.includes('CARGO') || norm.includes('ATRIBUICAO') || norm.includes('ATIVIDADE')) {
+        currentScore += 2;
+      } else if (norm.includes('CONTATO') || norm.includes('TELEFONE') || norm.includes('CELULAR') || norm.includes('FONE')) {
+        currentScore += 1;
+      } else if (norm.includes('ESCALA') || norm.includes('MODALIDADE') || norm.includes('GRUPO') || norm.includes('TURMA') || norm.includes('ALA')) {
+        currentScore += 1;
+      }
+    });
+
+    if (currentScore > bestHeaderScore) {
+      bestHeaderScore = currentScore;
+      headerRowIndex = r;
+    }
+  }
+
+  // If score is weak (< 2), try fallback: see if row 0 has data directly
+  if (bestHeaderScore < 2) {
     headerRowIndex = 0;
   }
 
@@ -225,28 +273,29 @@ export async function parseEfetivoExcel(file: File): Promise<ParseExcelResult> {
 
   headerRow.forEach((h, idx) => {
     const norm = normalizeHeader(h);
+    if (!norm) return;
 
-    if (colMatricula === -1 && (norm.includes('MATRICULA') || norm === 'RE' || norm === 'RG' || norm === 'NUMERO' || norm === 'CADASTRO')) {
+    if (colMatricula === -1 && (norm.includes('MATRICULA') || norm === 'MAT' || norm === 'RE' || norm === 'RG' || norm === 'NUMERO' || norm === 'CADASTRO' || norm === 'ID')) {
       colMatricula = idx;
-    } else if (colPosto === -1 && (norm.includes('POSTO') || norm.includes('GRADUACAO') || norm === 'GRAD' || norm === 'PG')) {
+    } else if (colPosto === -1 && (norm.includes('POSTO') || norm.includes('GRADUACAO') || norm === 'GRAD' || norm === 'PG' || norm.includes('HIERARQUIA') || norm.includes('PATENTE'))) {
       colPosto = idx;
-    } else if (colNomeGuerra === -1 && (norm.includes('GUERRA') || norm === 'NOMEOPERACIONAL' || norm === 'APELIDO')) {
+    } else if (colNomeGuerra === -1 && (norm.includes('GUERRA') || norm === 'NOMEOPERACIONAL' || norm === 'APELIDO' || norm.includes('NOMEDEGUERRA'))) {
       colNomeGuerra = idx;
-    } else if (colNomeCompleto === -1 && (norm.includes('COMPLETO') || norm.includes('NOMECIVIL') || norm === 'NOME' || norm === 'MILITAR' || norm === 'POLICIAL')) {
+    } else if (colNomeCompleto === -1 && (norm.includes('COMPLETO') || norm.includes('NOMECIVIL') || norm === 'NOME' || norm === 'MILITAR' || norm === 'POLICIAL' || norm === 'SERVIDOR')) {
       colNomeCompleto = idx;
-    } else if (colSituacao === -1 && (norm.includes('SITUACAO') || norm.includes('STATUS') || norm.includes('ESTADO') || norm.includes('CONDICAO'))) {
+    } else if (colSituacao === -1 && (norm.includes('SITUACAO') || norm.includes('STATUS') || norm.includes('ESTADO') || norm.includes('CONDICAO') || norm.includes('DESTINO') || norm.includes('LOTACAO') || norm.includes('POSTODESERVICO') || norm.includes('LOCAL'))) {
       colSituacao = idx;
-    } else if (colFuncao === -1 && (norm.includes('FUNCAO') || norm.includes('CARGO') || norm.includes('ATRIBUICAO') || norm.includes('ATIVIDADE'))) {
+    } else if (colFuncao === -1 && (norm.includes('FUNCAO') || norm.includes('CARGO') || norm.includes('ATRIBUICAO') || norm.includes('ATIVIDADE') || norm.includes('SERVICO'))) {
       colFuncao = idx;
-    } else if (colContato === -1 && (norm.includes('CONTATO') || norm.includes('TELEFONE') || norm.includes('CELULAR') || norm.includes('FONE') || norm.includes('WHATSAPP'))) {
+    } else if (colContato === -1 && (norm.includes('CONTATO') || norm.includes('TELEFONE') || norm.includes('CELULAR') || norm.includes('FONE') || norm.includes('WHATSAPP') || norm === 'TEL' || norm === 'CEL')) {
       colContato = idx;
     } else if (colEscalaTipo === -1 && (norm.includes('TIPOESCALA') || norm.includes('MODALIDADE') || norm.includes('REGIME') || norm === 'ESCALA')) {
       colEscalaTipo = idx;
-    } else if (colGrupoEscala === -1 && (norm.includes('GRUPO') || norm.includes('EQUIPE') || norm.includes('TURMA') || norm.includes('ALA'))) {
+    } else if (colGrupoEscala === -1 && (norm.includes('GRUPO') || norm.includes('EQUIPE') || norm.includes('TURMA') || norm.includes('ALA') || norm.includes('PELOTAO') || norm.includes('CIA'))) {
       colGrupoEscala = idx;
-    } else if (colDataAdmissao === -1 && (norm.includes('ADMISSAO') || norm.includes('INCLUSAO') || norm.includes('INGRESSO') || norm.includes('DATAINGRESSO'))) {
+    } else if (colDataAdmissao === -1 && (norm.includes('ADMISSAO') || norm.includes('INCLUSAO') || norm.includes('INGRESSO') || norm.includes('DATAINGRESSO') || norm.includes('DATAADMISSAO'))) {
       colDataAdmissao = idx;
-    } else if (colDataRetorno === -1 && (norm.includes('RETORNO') || norm.includes('PREVISAO') || norm.includes('TERMINO'))) {
+    } else if (colDataRetorno === -1 && (norm.includes('RETORNO') || norm.includes('PREVISAO') || norm.includes('TERMINO') || norm.includes('DATARETORNO'))) {
       colDataRetorno = idx;
     } else if (colObservacao === -1 && (norm.includes('OBSERVACAO') || norm.includes('OBS') || norm.includes('NOTA') || norm.includes('COMENTARIO'))) {
       colObservacao = idx;
@@ -255,16 +304,29 @@ export async function parseEfetivoExcel(file: File): Promise<ParseExcelResult> {
 
   // If nomeGuerra and nomeCompleto were assigned to the same or missing
   if (colNomeGuerra === -1 && colNomeCompleto !== -1) {
-    // Check if there's another column containing "NOME"
     headerRow.forEach((h, idx) => {
       const norm = normalizeHeader(h);
       if (idx !== colNomeCompleto && norm.includes('NOME')) {
         colNomeGuerra = idx;
       }
     });
+  } else if (colNomeCompleto === -1 && colNomeGuerra !== -1) {
+    colNomeCompleto = colNomeGuerra;
+  }
+
+  // Secondary heuristic: if colNomeCompleto and colNomeGuerra are still -1, search columns for one with name-like strings
+  if (colNomeCompleto === -1 && colNomeGuerra === -1) {
+    for (let c = 0; c < (rawRows[headerRowIndex + 1]?.length || 0); c++) {
+      const sampleVal = cleanStr(rawRows[headerRowIndex + 1]?.[c]);
+      if (sampleVal && sampleVal.length > 4 && isNaN(Number(sampleVal)) && !sampleVal.includes('/')) {
+        colNomeCompleto = c;
+        break;
+      }
+    }
   }
 
   const militares: EfetivoMilitar[] = [];
+  const usedIds = new Set<string>();
 
   for (let r = headerRowIndex + 1; r < rawRows.length; r++) {
     const row = rawRows[r];
@@ -274,7 +336,7 @@ export async function parseEfetivoExcel(file: File): Promise<ParseExcelResult> {
     const rawNomeCompleto = colNomeCompleto !== -1 ? cleanStr(row[colNomeCompleto]) : '';
     const rawNomeGuerra = colNomeGuerra !== -1 ? cleanStr(row[colNomeGuerra]) : '';
     const rawPosto = colPosto !== -1 ? cleanStr(row[colPosto]) : '';
-    const rawMatricula = colMatricula !== -1 ? cleanStr(row[colMatricula]) : '';
+    let rawMatricula = colMatricula !== -1 ? cleanStr(row[colMatricula]) : '';
     const rawSituacao = colSituacao !== -1 ? cleanStr(row[colSituacao]) : '';
     const rawFuncao = colFuncao !== -1 ? cleanStr(row[colFuncao]) : '';
     const rawContato = colContato !== -1 ? cleanStr(row[colContato]) : '';
@@ -284,8 +346,12 @@ export async function parseEfetivoExcel(file: File): Promise<ParseExcelResult> {
     const rawDataRetorno = colDataRetorno !== -1 ? formatExcelDate(row[colDataRetorno]) : '';
     const rawObservacao = colObservacao !== -1 ? cleanStr(row[colObservacao]) : '';
 
-    // If completely empty row, skip
+    // If completely empty row or looks like a subtotal/summary row, skip
     if (!rawNomeCompleto && !rawNomeGuerra && !rawMatricula) {
+      continue;
+    }
+    const combinedStr = `${rawNomeCompleto} ${rawNomeGuerra}`.toUpperCase();
+    if (combinedStr.includes('TOTAL DE MILITARES') || combinedStr.includes('TOTAL GERAL') || combinedStr.includes('SUBTOTAL')) {
       continue;
     }
 
@@ -315,18 +381,42 @@ export async function parseEfetivoExcel(file: File): Promise<ParseExcelResult> {
       }
     }
 
+    // Clean up war name if it starts with posto repetition
+    if (nomeGuerra) {
+      nomeGuerra = nomeGuerra.trim();
+    }
+
+    // If matricula was not mapped, try to find a cell in this row that looks like a matricula
+    if (!rawMatricula) {
+      for (const cell of row) {
+        const strVal = cleanStr(cell);
+        if (/^\d{4,6}(-\d)?$/.test(strVal)) {
+          rawMatricula = strVal;
+          break;
+        }
+      }
+    }
+
     // Determine Situação
     const situacao = normalizeSituacao(rawSituacao);
 
     // Determine Escala Tipo
     const escalaTipo = normalizeEscalaTipo(rawEscalaTipo);
 
-    // Generate/Normalize Matrícula and ID
-    const cleanMatricula = rawMatricula || `${Math.floor(10000 + Math.random() * 90000)}-${Math.floor(Math.random() * 9)}`;
-    const id = `PM-${cleanMatricula.replace(/[^0-9]/g, '').slice(-4) || String(militares.length + 1).padStart(3, '0')}`;
+    // Generate guaranteed unique ID (never colliding, avoids React duplicate key errors)
+    const cleanMatricula = rawMatricula ? rawMatricula.replace(/[^\d-]/g, '').trim() : `${Math.floor(10000 + Math.random() * 90000)}-${Math.floor(Math.random() * 9)}`;
+    const matDigits = cleanMatricula.replace(/\D/g, '');
+    let baseId = matDigits.length >= 3 ? `PM-${matDigits}` : `PM-${String(r + 1).padStart(4, '0')}`;
+    let uniqueId = baseId;
+    let counter = 1;
+    while (usedIds.has(uniqueId)) {
+      uniqueId = `${baseId}-${counter}`;
+      counter++;
+    }
+    usedIds.add(uniqueId);
 
     militares.push({
-      id,
+      id: uniqueId,
       matricula: cleanMatricula,
       postoGraduacao: posto,
       nomeGuerra: nomeGuerra.toUpperCase(),
@@ -343,7 +433,9 @@ export async function parseEfetivoExcel(file: File): Promise<ParseExcelResult> {
   }
 
   if (militares.length === 0) {
-    throw new Error('Nenhum militar válido foi identificado no arquivo. Verifique o cabeçalho e os dados das colunas.');
+    throw new Error(
+      `Não foi possível identificar militares na planilha (Aba: "${selectedSheetName}"). Verifique se há colunas com Nome/Nome de Guerra e Posto ou Matrícula, ou utilize o botão "Modelo Excel" para baixar uma planilha de exemplo.`
+    );
   }
 
   return {

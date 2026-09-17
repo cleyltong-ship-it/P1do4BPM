@@ -35,6 +35,7 @@ import { ImportEfetivoModal } from './components/ImportEfetivoModal';
 import { ImportEscalaPdfModal } from './components/ImportEscalaPdfModal';
 import { 
   getPrevisaoFerias, 
+  savePrevisaoFerias,
   addPrevisaoFerias, 
   updatePrevisaoFerias, 
   deletePrevisaoFerias, 
@@ -96,6 +97,11 @@ export default function App() {
     saveEfetivo(newEfetivo);
     setEfetivo(newEfetivo);
     setMetrics(calculateDashboardMetrics(newEfetivo));
+  };
+
+  const handleFeriasChange = (newFerias: PrevisaoFerias[]) => {
+    savePrevisaoFerias(newFerias);
+    setFerias(newFerias);
   };
 
   const handleAddMilitar = (m: Omit<EfetivoMilitar, 'id'>) => {

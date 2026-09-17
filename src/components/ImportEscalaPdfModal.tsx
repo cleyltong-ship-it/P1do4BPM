@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { 
   FileText, 
   Upload, 
@@ -28,18 +28,16 @@ const POSTOS_ESCALA_BATALHAO = [
   'Comandante',
   'Subcomandante',
   'Supervisor',
-  'Aux. do Of. de Operações',
   'Auxiliar do Supervisor',
-  'Guarnição do Oficial de Operações',
+  'Guarda do Quartel',
+  'Reserva de Armamento',
+  'Vistoriador',
   'Solo',
   'Força Tática',
   'Base Comunitária',
+  'Comandante da Base Comunitária',
   'Administrativo',
-  'P2',
-  'Guarda do Quartel',
-  'Armeiro',
-  'Reserva de Armamento',
-  'Vistoriador'
+  'P2'
 ];
 
 const SITUACOES_FORA_ESCALA = [
@@ -74,6 +72,20 @@ export const ImportEscalaPdfModal: React.FC<ImportEscalaPdfModalProps> = ({
   const [searchFilter, setSearchFilter] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Combine all soldiers: both from existing roster and discovered from the PDF
+  // Must be called unconditionally before any early return to satisfy the Rules of Hooks
+  const allSoldiersForPreview = useMemo(() => {
+    if (!isOpen) return [];
+    const map = new Map<string, EfetivoMilitar>();
+    efetivo.forEach(m => map.set(m.id, m));
+    if (parsedResult?.militaresEncontrados) {
+      parsedResult.militaresEncontrados.forEach(m => {
+        map.set(m.id, m);
+      });
+    }
+    return Array.from(map.values());
+  }, [isOpen, efetivo, parsedResult]);
 
   if (!isOpen) return null;
 
@@ -116,6 +128,11 @@ export const ImportEscalaPdfModal: React.FC<ImportEscalaPdfModalProps> = ({
           initialAssignments[item.militarId] = item.status;
         }
       });
+      (result.militaresEncontrados || []).forEach(m => {
+        if (!initialAssignments[m.id]) {
+          initialAssignments[m.id] = m.situacao;
+        }
+      });
       setManualAssignments(initialAssignments);
     } catch (err: any) {
       console.error('Error parsing PDF:', err);
@@ -149,6 +166,11 @@ export const ImportEscalaPdfModal: React.FC<ImportEscalaPdfModalProps> = ({
       result.itensAfastados.forEach(item => {
         if (item.militarId) {
           initialAssignments[item.militarId] = item.status;
+        }
+      });
+      (result.militaresEncontrados || []).forEach(m => {
+        if (!initialAssignments[m.id]) {
+          initialAssignments[m.id] = m.situacao;
         }
       });
       setManualAssignments(initialAssignments);
@@ -203,14 +225,14 @@ export const ImportEscalaPdfModal: React.FC<ImportEscalaPdfModalProps> = ({
     const aDisposicaoCount = updated.filter(m => m.situacao === 'À Disposição').length;
     const afastadosCount = updated.filter(m => m.situacao === 'LTS' || m.situacao === 'Férias').length;
 
-    const summary = `Escala aplicada: ${escaladosCount} militares escalados em seus postos, ${aDisposicaoCount} à disposição e ${afastadosCount} afastados.`;
+    const summary = `Escala aplicada: ${escaladosCount} militares escalados em seus postos, ${aDisposicaoCount} à disposição e ${afastadosCount} afastados. Total de militares: ${updated.length}.`;
     
     onApplyEscala(updated, summary);
     onClose();
   };
 
   // Preview soldiers list
-  const previewRows = efetivo.map(m => {
+  const previewRows = allSoldiersForPreview.map(m => {
     const currentAssignment = manualAssignments[m.id] || (
       m.situacao === 'LTS' || m.situacao === 'Férias' ? m.situacao : unscaledDefault
     );
@@ -345,7 +367,7 @@ export const ImportEscalaPdfModal: React.FC<ImportEscalaPdfModalProps> = ({
                       Arraste ou clique para selecionar a Escala em PDF
                     </h4>
                     <p className="text-xs text-ink/60 max-w-md mx-auto">
-                      Reconhecimento inteligente por escalas: Escala 01 (Solo), Escala 02 (Força Tática), Escala 03 (Aux. Supervisor, Guarda, Armeiro, Guarnição do Oficial de Operações, Vistoriador), Escala 04 (Administrativo) e Escala 05 (Base Comunitária).
+                      Reconhecimento inteligente por escalas: Escala 01 (Solo), Escala 02 (Força Tática), Escala 03 (Supervisor, Auxiliar do Supervisor, Guarda do Quartel, Reserva de Armamento, Vistoriador), Escala 04 (Administrativo) e Escala 05 (Base Comunitária).
                     </p>
                   </div>
 
@@ -364,7 +386,7 @@ export const ImportEscalaPdfModal: React.FC<ImportEscalaPdfModalProps> = ({
                       type="button"
                       onClick={() => {
                         setRawPastedText(
-                          `ESCALA DE SERVIÇO DIÁRIO - 4º BPM\nDATA: ${new Date().toLocaleDateString('pt-BR')}\n\nESCALA 01 - SOLO:\nSd Lima (Mat. 13220-4)\nCb Henrique (Mat. 12301-4)\nSd Rocha (Mat. 13005-2)\n\nESCALA 02 - FORÇA TÁTICA:\nCap Medeiros (Mat. 10892-0)\n1º Sgt Wanderley (Mat. 10982-1)\nCb Peixoto (Mat. 12550-9)\n\nESCALA 03:\nGUARNIÇÃO DO OFICIAL DE OPERAÇÕES: Cap Brandão (Mat. 10789-4)\nAUX.DOOF.DEOPERAÇÕES: 1º Ten Vieira (Mat. 11204-6)\nSEGURANÇA INTERNADO QUARTEL: 1º Sgt Silva (Mat. 10456-2)\nARMEIRO: Sd Souza (Mat. 13110-8)\nVISTORIADOR: Cb Martins (Mat. 12440-1)\n\nESCALA 04:\nSubten Dias (Mat. 11580-2) - Seção P/1 Recursos Humanos\nCb Fagundes (Mat. 12880-3) - P/2 Agência de Inteligência Policial\n\nESCALA 05:\nCb Pereira (Mat. 12550-9) - Base Comunitária\n3º Sgt Ferreira (Mat. 11874-9) - Base Comunitária\n\nAFASTADOS:\nLTS: Sd Carvalho (Mat. 13315-7)\nFérias: Maj Silveira (Mat. 10521-8)`
+                          `ESCALA DE SERVIÇO DIÁRIO - 4º BPM\nDATA: ${new Date().toLocaleDateString('pt-BR')}\n\nESCALA 01 - SOLO:\nSd Lima (Mat. 13220-4)\nCb Henrique (Mat. 12301-4)\nSd Rocha (Mat. 13005-2)\n\nESCALA 02 - FORÇA TÁTICA:\nCap Medeiros (Mat. 10892-0)\n1º Sgt Wanderley (Mat. 10982-1)\nCb Peixoto (Mat. 12550-9)\n\nESCALA 03:\nGUARNIÇÃODOOFICIALDE OPERAÇÕES: Cap Brandão (Mat. 10789-4)\nAUX.DOOF.DEOPERAÇÕES: 1º Ten Vieira (Mat. 11204-6)\nSEGURANÇA INTERNADO QUARTEL: 1º Sgt Silva (Mat. 10456-2)\nARMEIRO: Sd Souza (Mat. 13110-8)\nVISTORIADOR: Cb Martins (Mat. 12440-1)\n\nESCALA 04:\nSubten Dias (Mat. 11580-2) - Seção P/1 Recursos Humanos\nCb Fagundes (Mat. 12880-3) - P/2 Agência de Inteligência Policial\n\nESCALA 05:\nSgt Dayse (Mat. 11874-9) - Base Comunitária\nCb Pereira (Mat. 12550-9) - Base Comunitária\n\nAFASTADOS:\nLTS: Sd Carvalho (Mat. 13315-7)\nFérias: Maj Silveira (Mat. 10521-8)`
                         );
                       }}
                       className="text-xs text-emerald-800 font-bold hover:underline cursor-pointer flex items-center gap-1"
@@ -474,7 +496,7 @@ export const ImportEscalaPdfModal: React.FC<ImportEscalaPdfModalProps> = ({
                     Não Escalados (Restante)
                   </span>
                   <div className="text-2xl font-black font-mono text-emerald-950 mt-1">
-                    {efetivo.length - parsedResult.itensEscalados.length - parsedResult.itensAfastados.length}
+                    {Math.max(0, allSoldiersForPreview.length - parsedResult.itensEscalados.length - parsedResult.itensAfastados.length)}
                   </div>
                   <p className="text-[11px] text-emerald-800/70 mt-0.5">Ficarão à disposição do Btl</p>
                 </div>
@@ -514,7 +536,7 @@ export const ImportEscalaPdfModal: React.FC<ImportEscalaPdfModalProps> = ({
                       previewFilter === 'TODOS' ? 'bg-white text-ink shadow-2xs' : 'text-ink/60'
                     }`}
                   >
-                    Todos ({efetivo.length})
+                    Todos ({allSoldiersForPreview.length})
                   </button>
                   <button
                     type="button"
@@ -523,7 +545,7 @@ export const ImportEscalaPdfModal: React.FC<ImportEscalaPdfModalProps> = ({
                       previewFilter === 'ESCALADOS' ? 'bg-white text-ink shadow-2xs' : 'text-ink/60'
                     }`}
                   >
-                    Escalados ({parsedResult.itensEscalados.length})
+                    Escalados ({allSoldiersForPreview.filter(m => !['À Disposição', 'LTS', 'Férias'].includes(manualAssignments[m.id] || (m.situacao === 'LTS' || m.situacao === 'Férias' ? m.situacao : unscaledDefault))).length})
                   </button>
                   <button
                     type="button"
@@ -532,7 +554,7 @@ export const ImportEscalaPdfModal: React.FC<ImportEscalaPdfModalProps> = ({
                       previewFilter === 'NAO_ESCALADOS' ? 'bg-white text-ink shadow-2xs' : 'text-ink/60'
                     }`}
                   >
-                    Não Escalados ({efetivo.length - parsedResult.itensEscalados.length})
+                    Não Escalados ({allSoldiersForPreview.filter(m => ['À Disposição', 'LTS', 'Férias'].includes(manualAssignments[m.id] || (m.situacao === 'LTS' || m.situacao === 'Férias' ? m.situacao : unscaledDefault))).length})
                   </button>
                 </div>
 

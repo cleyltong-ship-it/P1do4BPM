@@ -56,8 +56,9 @@ export interface EscalaPdfResult {
   titulo: string;
   dataEscala?: string;
   itensEscalados: EscalaItemParsed[];
-  itensAfastados: { militarId?: string; nome: string; status: 'LTS' | 'Férias' }[];
+  itensAfastados: { militarId?: string; nome: string; status: 'LTS' | 'Férias'; posto?: string; matricula?: string }[];
   totalEscalados: number;
+  militaresEncontrados?: EfetivoMilitar[];
 }
 
 export interface SoldierService {

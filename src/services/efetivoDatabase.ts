@@ -362,13 +362,33 @@ export const INITIAL_EFETIVO: EfetivoMilitar[] = [
   }
 ];
 
+export function ensureUniqueIds(list: EfetivoMilitar[]): EfetivoMilitar[] {
+  const used = new Set<string>();
+  return list.map((m, idx) => {
+    let id = m.id;
+    if (!id || used.has(id)) {
+      const mat = m.matricula ? m.matricula.replace(/\D/g, '') : '';
+      const base = mat ? `PM-${mat}` : `PM-${String(idx + 1).padStart(4, '0')}`;
+      id = base;
+      let counter = 1;
+      while (used.has(id)) {
+        id = `${base}-${counter}`;
+        counter++;
+      }
+    }
+    used.add(id);
+    return { ...m, id };
+  });
+}
+
 export function getEfetivo(): EfetivoMilitar[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     // Only initialize default data on the very first visit (when key does not exist at all)
     if (raw === null) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_EFETIVO));
-      return INITIAL_EFETIVO;
+      const initial = ensureUniqueIds(INITIAL_EFETIVO);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
+      return initial;
     }
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
@@ -387,7 +407,9 @@ export function getEfetivo(): EfetivoMilitar[] {
       }
       return { ...m, situacao };
     });
-    return migrated;
+    // Sanitize any existing duplicates in storage
+    const sanitized = ensureUniqueIds(migrated);
+    return sanitized;
   } catch (err) {
     console.error('Erro ao ler efetivo do localStorage:', err);
     return [];
@@ -396,23 +418,36 @@ export function getEfetivo(): EfetivoMilitar[] {
 
 export function saveEfetivo(data: EfetivoMilitar[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    const sanitized = ensureUniqueIds(data);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitized));
   } catch (err) {
     console.error('Erro ao salvar efetivo:', err);
   }
 }
 
 export function clearAllEfetivo(): EfetivoMilitar[] {
-  saveEfetivo([]);
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+  } catch (err) {
+    console.error('Erro ao limpar efetivo:', err);
+  }
   return [];
 }
 
 export function addMilitar(militar: Omit<EfetivoMilitar, 'id'>): EfetivoMilitar {
   const current = getEfetivo();
-  const nextId = `PM-${String(current.length + 1).padStart(3, '0')}`;
+  const matDigits = militar.matricula ? militar.matricula.replace(/\D/g, '') : '';
+  let candidateId = matDigits ? `PM-${matDigits}` : `PM-${String(current.length + 1).padStart(3, '0')}`;
+  let counter = 1;
+  const existingIds = new Set(current.map(m => m.id));
+  while (existingIds.has(candidateId)) {
+    candidateId = `PM-${matDigits || current.length + 1}-${counter}`;
+    counter++;
+  }
+
   const novo: EfetivoMilitar = {
     ...militar,
-    id: nextId,
+    id: candidateId,
     nomeGuerra: militar.nomeGuerra.toUpperCase().trim(),
     nomeCompleto: militar.nomeCompleto.toUpperCase().trim(),
   };

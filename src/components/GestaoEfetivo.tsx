@@ -50,6 +50,7 @@ export const POSTOS_ESCALA_BATALHAO: string[] = [
   'Solo',
   'Força Tática',
   'Base Comunitária',
+  'Comandante da Base Comunitária',
   'Administrativo',
   'P2',
   'Guarda do Quartel',
