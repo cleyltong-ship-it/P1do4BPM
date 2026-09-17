@@ -18,8 +18,24 @@ import {
   X,
   Building2,
   CalendarRange,
-  ShieldAlert
+  ShieldAlert,
+  BarChart3,
+  TrendingUp,
+  Layers,
+  Sparkles,
+  Check
 } from 'lucide-react';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+  Legend,
+  Cell
+} from 'recharts';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -164,6 +180,79 @@ export function checkMilitarNaoOperacional(
   return { isNaoOperacional: false };
 }
 
+export interface CruzamentoMilitarInfo {
+  militar?: EfetivoMilitar;
+  encontradoNoEfetivo: boolean;
+  matricula: string;
+  setorEscala: string;
+  isNaoOperacional: boolean;
+  categoriaNaoOperacional?: CategoriaNaoOperacional;
+  detalheSetor: string;
+  escalaTipo?: string;
+  funcao?: string;
+}
+
+/**
+ * Realiza o cruzamento de dados entre a relação de Férias e a Gestão de Efetivo
+ * utilizando a MATRÍCULA como identificador primário, resgatando o setor na escala
+ * (Solo, Força Tática, Base Comunitária, Administrativo, etc.) e classificando o impacto operacional real.
+ */
+export function getCruzamentoMilitar(
+  item: PrevisaoFerias, 
+  efetivo: EfetivoMilitar[]
+): CruzamentoMilitarInfo {
+  const norm = (str?: string) => 
+    (str || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .trim();
+
+  const cleanDigits = (s?: string) => (s || '').replace(/\D/g, '');
+
+  const itemMatDigits = cleanDigits(item.matricula);
+
+  // 1. Cruzamento prioritário pela Matrícula (chave presente em ambas as listas)
+  let m = efetivo.find(e => {
+    if (itemMatDigits && cleanDigits(e.matricula) === itemMatDigits) return true;
+    if (e.matricula && item.matricula && e.matricula.trim().toLowerCase() === item.matricula.trim().toLowerCase()) return true;
+    return false;
+  });
+
+  // 2. Fallback de correspondência por nome completo ou nome de guerra
+  if (!m) {
+    const itemNome = norm(item.nome);
+    m = efetivo.find(e => {
+      const eNome = norm(e.nomeCompleto);
+      if (eNome && itemNome && (eNome === itemNome || eNome.includes(itemNome) || itemNome.includes(eNome))) return true;
+      if (e.nomeGuerra && item.nomeGuerra && norm(e.nomeGuerra) === norm(item.nomeGuerra)) return true;
+      return false;
+    });
+  }
+
+  const check = checkMilitarNaoOperacional(item, efetivo);
+
+  // Setor ou local da escala resgatado da Gestão de Efetivo
+  let setor = 'Operacional de Rua';
+  if (m) {
+    setor = m.situacao || m.localEscala || m.funcao || 'Operacional de Rua';
+  } else if (check.isNaoOperacional && check.categoria) {
+    setor = check.categoria;
+  }
+
+  return {
+    militar: m,
+    encontradoNoEfetivo: !!m,
+    matricula: item.matricula,
+    setorEscala: setor,
+    isNaoOperacional: check.isNaoOperacional,
+    categoriaNaoOperacional: check.categoria,
+    detalheSetor: check.detalhe || setor,
+    escalaTipo: m?.escalaTipo,
+    funcao: m?.funcao
+  };
+}
+
 interface GestaoFeriasProps {
   ferias: PrevisaoFerias[];
   efetivo: EfetivoMilitar[];
@@ -185,6 +274,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<string>('TODOS');
+  const [chartViewMode, setChartViewMode] = useState<'restantes' | 'todos'>('restantes');
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<PrevisaoFerias | null>(null);
@@ -399,6 +489,125 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
     };
   }, [selectedMonth, monthlyOperationalStats]);
 
+  // Meses restantes ou ano completo para o gráfico de barras
+  const mesesParaGrafico = useMemo(() => {
+    if (selectedYear > currentYear) {
+      // Ano futuro: todos os 12 meses são restantes
+      return MESES_DO_ANO;
+    } else if (selectedYear === currentYear) {
+      if (chartViewMode === 'restantes') {
+        // Do mês atual até dezembro (ex: Setembro a Dezembro)
+        return MESES_DO_ANO.slice(currentMonthIndex);
+      }
+      return MESES_DO_ANO;
+    } else {
+      return MESES_DO_ANO;
+    }
+  }, [selectedYear, currentYear, currentMonthIndex, chartViewMode]);
+
+  // Cruzamento detalhado de informações com a Gestão de Efetivo por Matrícula para o gráfico
+  const dadosGraficoImpacto = useMemo(() => {
+    return mesesParaGrafico.map(mes => {
+      const feriasDoMes = ferias.filter(f => f.ano === selectedYear && f.mesPrevisto === mes);
+      
+      let impactoOperacional = 0;
+      let descontados = 0;
+      const setoresCounts: Record<string, number> = {};
+      const categoriasDesconto: Record<string, number> = {};
+
+      feriasDoMes.forEach(f => {
+        const cruzamento = getCruzamentoMilitar(f, efetivo);
+        if (cruzamento.isNaoOperacional) {
+          descontados++;
+          const cat = cruzamento.categoriaNaoOperacional || 'Administrativo';
+          categoriasDesconto[cat] = (categoriasDesconto[cat] || 0) + 1;
+        } else {
+          impactoOperacional++;
+          const setor = cruzamento.setorEscala || 'Operacional de Rua';
+          setoresCounts[setor] = (setoresCounts[setor] || 0) + 1;
+        }
+      });
+
+      const mesIdx = MESES_DO_ANO.indexOf(mes);
+      const isMesAtual = selectedYear === currentYear && mesIdx === currentMonthIndex;
+
+      const setoresTop = Object.entries(setoresCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4);
+
+      return {
+        mes,
+        mesCurto: mes.slice(0, 3),
+        impactoOperacional,
+        descontados,
+        total: impactoOperacional + descontados,
+        isMesAtual,
+        setoresTop,
+        setoresCounts,
+        categoriasDesconto
+      };
+    });
+  }, [mesesParaGrafico, ferias, efetivo, selectedYear, currentYear, currentMonthIndex]);
+
+  // Indicadores consolidados dos meses restantes com cruzamento do efetivo
+  const kpisMesesRestantes = useMemo(() => {
+    let totalImpacto = 0;
+    let totalDescontados = 0;
+    let maxImpacto = -1;
+    let mesPico = '';
+    let vinculadosComEfetivo = 0;
+    let totalFeriasRestantes = 0;
+
+    const setoresRestantesTotais: Record<string, number> = {};
+
+    dadosGraficoImpacto.forEach(d => {
+      totalImpacto += d.impactoOperacional;
+      totalDescontados += d.descontados;
+      totalFeriasRestantes += d.total;
+
+      if (d.impactoOperacional > maxImpacto) {
+        maxImpacto = d.impactoOperacional;
+        mesPico = d.mes;
+      }
+
+      Object.entries(d.setoresCounts).forEach(([setor, count]) => {
+        setoresRestantesTotais[setor] = (setoresRestantesTotais[setor] || 0) + Number(count || 0);
+      });
+    });
+
+    ferias.forEach(f => {
+      if (f.ano === selectedYear && mesesParaGrafico.includes(f.mesPrevisto as MesAno)) {
+        const c = getCruzamentoMilitar(f, efetivo);
+        if (c.encontradoNoEfetivo) {
+          vinculadosComEfetivo++;
+        }
+      }
+    });
+
+    const mediaPorMes = dadosGraficoImpacto.length > 0 
+      ? Math.round((totalImpacto / dadosGraficoImpacto.length) * 10) / 10 
+      : 0;
+
+    const taxaVinculo = totalFeriasRestantes > 0 
+      ? Math.round((vinculadosComEfetivo / totalFeriasRestantes) * 100) 
+      : 100;
+
+    const topSetores = Object.entries(setoresRestantesTotais)
+      .sort((a, b) => b[1] - a[1]);
+
+    return {
+      totalImpacto,
+      totalDescontados,
+      totalGeral: totalFeriasRestantes,
+      mediaPorMes,
+      mesPico: mesPico || 'Nenhum',
+      maxImpacto: maxImpacto > 0 ? maxImpacto : 0,
+      taxaVinculo,
+      vinculadosComEfetivo,
+      topSetores
+    };
+  }, [dadosGraficoImpacto, ferias, efetivo, selectedYear, mesesParaGrafico]);
+
   const handleOpenAdd = () => {
     setEditingItem(null);
     setFormMatricula('');
@@ -474,7 +683,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
   // Export to Excel
   const handleExportExcel = () => {
     const data = filteredFerias.map((f, idx) => {
-      const check = checkMilitarNaoOperacional(f, efetivo);
+      const cruzamento = getCruzamentoMilitar(f, efetivo);
       return {
         'Nº': idx + 1,
         'Ano': f.ano,
@@ -483,8 +692,11 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
         'Nome Completo': f.nome,
         'Nome de Guerra': f.nomeGuerra || '',
         'Matrícula': f.matricula,
-        'Serviço': check.isNaoOperacional ? `Descontado (${check.categoria})` : 'Operacional',
+        'Setor na Escala': cruzamento.setorEscala,
+        'Enquadramento': cruzamento.isNaoOperacional ? `Descontado (${cruzamento.categoriaNaoOperacional})` : 'Operacional de Rua',
+        'Vínculo Efetivo': cruzamento.encontradoNoEfetivo ? 'Confirmado via Matrícula' : 'Não localizado no cadastro',
         'Período (Dias)': f.periodoDias || 30,
+        'Exercício (Ano Ref)': f.anoReferencia || '',
         'Data Início': f.dataInicio || '',
         'Data Fim': f.dataFim || '',
         'Situação': f.situacao,
@@ -517,14 +729,15 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
     );
 
     const tableRows = filteredFerias.map((f, i) => {
-      const check = checkMilitarNaoOperacional(f, efetivo);
+      const cruzamento = getCruzamentoMilitar(f, efetivo);
       return [
         String(i + 1),
         f.mesPrevisto,
         f.posto,
         f.nome,
         f.matricula,
-        check.isNaoOperacional ? `${check.categoria}` : 'Operacional',
+        cruzamento.setorEscala,
+        cruzamento.isNaoOperacional ? `Desc. (${cruzamento.categoriaNaoOperacional})` : 'Operacional',
         `${f.periodoDias || 30} dias`,
         f.situacao
       ];
@@ -532,7 +745,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
 
     autoTable(doc, {
       startY: 32,
-      head: [['Nº', 'Mês', 'Posto', 'Nome Completo', 'Matrícula', 'Enquadramento', 'Período', 'Situação']],
+      head: [['Nº', 'Mês', 'Posto', 'Nome Completo', 'Matrícula', 'Setor Escala', 'Enquadramento', 'Período', 'Situação']],
       body: tableRows,
       theme: 'grid',
       styles: { fontSize: 8, cellPadding: 2 },
@@ -626,6 +839,274 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
             <div className="text-2xl font-black font-mono text-blue-300 mt-0.5">{concluidasCount}</div>
             <div className="text-[10px] text-blue-200/60 font-mono mt-0.5">Meses anteriores</div>
           </div>
+        </div>
+      </div>
+
+      {/* PAINEL DO GRÁFICO DE BARRAS: IMPACTO OPERACIONAL REAL NOS MESES RESTANTES COM CRUZAMENTO DO EFETIVO */}
+      <div className="bg-white rounded-3xl border border-line shadow-xs overflow-hidden">
+        {/* Header do Gráfico */}
+        <div className="p-5 sm:p-6 border-b border-line bg-gradient-to-r from-slate-50 via-emerald-50/40 to-slate-50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="p-2 rounded-xl bg-emerald-800 text-white shadow-xs">
+                <BarChart3 size={18} />
+              </span>
+              <div>
+                <h3 className="text-base font-black text-ink tracking-tight flex items-center gap-2">
+                  Impacto Operacional Real — {chartViewMode === 'restantes' && selectedYear === currentYear ? 'Meses Restantes' : `Ano ${selectedYear}`}
+                  <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
+                    Escalas de Rua
+                  </span>
+                </h3>
+                <p className="text-xs text-ink/60">
+                  Cruzamento automático pela <strong>Matrícula</strong> com os postos e setores da <strong>Gestão de Efetivo</strong> (Solo, Força Tática, Base Comunitária, etc.), descontando funções administrativas e de comando.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Toggle Meses Restantes vs Ano Completo */}
+          <div className="flex items-center gap-1.5 p-1 bg-slate-200/80 rounded-xl self-start md:self-auto shrink-0">
+            <button
+              onClick={() => setChartViewMode('restantes')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                chartViewMode === 'restantes'
+                  ? 'bg-white text-emerald-900 shadow-xs'
+                  : 'text-ink/60 hover:text-ink'
+              }`}
+            >
+              <TrendingUp size={13} />
+              {selectedYear === currentYear ? 'Meses Restantes (Set-Dez)' : 'A Fruir'}
+            </button>
+            <button
+              onClick={() => setChartViewMode('todos')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                chartViewMode === 'todos'
+                  ? 'bg-white text-emerald-900 shadow-xs'
+                  : 'text-ink/60 hover:text-ink'
+              }`}
+            >
+              <CalendarRange size={13} />
+              Ano Completo (12 Meses)
+            </button>
+          </div>
+        </div>
+
+        {/* Resumo Rápido dos Indicadores de Impacto */}
+        <div className="p-5 sm:p-6 grid grid-cols-2 sm:grid-cols-4 gap-4 border-b border-line bg-slate-50/50">
+          <div className="p-3.5 bg-white rounded-2xl border border-line shadow-xs">
+            <span className="text-[10px] uppercase font-mono font-bold text-ink/50 block">Impacto Real Total</span>
+            <div className="text-2xl font-black font-mono text-emerald-950 mt-1 flex items-baseline gap-1.5">
+              {kpisMesesRestantes.totalImpacto}
+              <span className="text-xs font-normal text-ink/60">policiais</span>
+            </div>
+            <span className="text-[10px] text-emerald-700 font-mono block mt-0.5">
+              Escala de viaturas/rua
+            </span>
+          </div>
+
+          <div className="p-3.5 bg-white rounded-2xl border border-line shadow-xs">
+            <span className="text-[10px] uppercase font-mono font-bold text-ink/50 block">Mês com Maior Desfalque</span>
+            <div className="text-xl font-black font-mono text-amber-600 mt-1 truncate">
+              {kpisMesesRestantes.mesPico}
+            </div>
+            <span className="text-[10px] text-amber-800 font-mono block mt-0.5">
+              {kpisMesesRestantes.maxImpacto} PMs operacionais
+            </span>
+          </div>
+
+          <div className="p-3.5 bg-white rounded-2xl border border-line shadow-xs">
+            <span className="text-[10px] uppercase font-mono font-bold text-ink/50 block">Média Mensal</span>
+            <div className="text-2xl font-black font-mono text-ink mt-1 flex items-baseline gap-1.5">
+              {kpisMesesRestantes.mediaPorMes}
+              <span className="text-xs font-normal text-ink/60">PMs/mês</span>
+            </div>
+            <span className="text-[10px] text-ink/50 font-mono block mt-0.5">
+              {mesesParaGrafico.length} meses avaliados
+            </span>
+          </div>
+
+          <div className="p-3.5 bg-white rounded-2xl border border-line shadow-xs">
+            <span className="text-[10px] uppercase font-mono font-bold text-ink/50 block">Cruzamento por Matrícula</span>
+            <div className="text-2xl font-black font-mono text-emerald-800 mt-1 flex items-center gap-1.5">
+              <CheckCircle2 size={18} className="text-emerald-600" />
+              {kpisMesesRestantes.taxaVinculo}%
+            </div>
+            <span className="text-[10px] text-emerald-700 font-mono block mt-0.5">
+              {kpisMesesRestantes.vinculadosComEfetivo} militares localizados
+            </span>
+          </div>
+        </div>
+
+        {/* Gráfico de Barras Recharts */}
+        <div className="p-5 sm:p-6">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <div className="flex items-center gap-4 text-xs font-mono">
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-md bg-emerald-600"></span>
+                <span className="font-bold text-ink">Impacto Operacional Real (Viaturas / Rua)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-md bg-slate-400"></span>
+                <span className="text-ink/60">Descontados (Admin / Cmt / LTS / AD)</span>
+              </div>
+            </div>
+
+            <span className="text-[11px] text-ink/50 italic">
+              Clique em uma barra para filtrar a lista abaixo
+            </span>
+          </div>
+
+          <div className="h-72 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={dadosGraficoImpacto}
+                margin={{ top: 15, right: 10, left: -20, bottom: 5 }}
+                onClick={(e: any) => {
+                  if (e && e.activePayload && e.activePayload[0]) {
+                    const mesClicado = e.activePayload[0].payload.mes;
+                    setSelectedMonth(mesClicado);
+                  }
+                }}
+                className="cursor-pointer"
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <XAxis 
+                  dataKey="mes" 
+                  stroke="#64748b" 
+                  tick={{ fontSize: 11, fontWeight: 600 }}
+                  tickFormatter={(val: string) => val.length > 8 ? val.slice(0, 3) : val}
+                />
+                <YAxis 
+                  allowDecimals={false} 
+                  stroke="#64748b" 
+                  tick={{ fontSize: 11, fontFamily: 'monospace' }} 
+                />
+                <Tooltip 
+                  content={({ active, payload, label }) => {
+                    if (active && payload && payload.length) {
+                      const data = payload[0].payload;
+                      return (
+                        <div className="bg-slate-950 text-white p-3.5 rounded-2xl shadow-xl border border-slate-800 text-xs min-w-[240px] space-y-2 font-sans z-50">
+                          <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                            <span className="font-black text-sm text-emerald-400 font-mono">{label} / {selectedYear}</span>
+                            {data.isMesAtual && (
+                              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 rounded-full text-[10px] font-bold border border-emerald-500/40">
+                                Mês Atual
+                              </span>
+                            )}
+                          </div>
+                          
+                          <div className="space-y-1 font-mono">
+                            <div className="flex items-center justify-between text-amber-300 font-bold">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                                Impacto Operacional Real:
+                              </span>
+                              <span className="text-sm">{data.impactoOperacional} PMs</span>
+                            </div>
+                            <div className="flex items-center justify-between text-slate-400">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-slate-500"></span>
+                                Descontados (Admin/Cmt/LTS):
+                              </span>
+                              <span>{data.descontados}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-white/90 border-t border-slate-800 pt-1 font-bold">
+                              <span>Total de Férias Previstas:</span>
+                              <span>{data.total} militares</span>
+                            </div>
+                          </div>
+
+                          {data.setoresTop && data.setoresTop.length > 0 && (
+                            <div className="border-t border-slate-800 pt-1.5 space-y-1">
+                              <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400 block font-bold">
+                                Setores da Escala Afetados:
+                              </span>
+                              <div className="flex flex-wrap gap-1">
+                                {data.setoresTop.map(([setor, qty]: [string, number]) => (
+                                  <span key={setor} className="px-2 py-0.5 rounded bg-slate-800 text-[10px] text-emerald-300 font-mono border border-slate-700">
+                                    {setor}: <strong>{qty}</strong>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="text-[10px] text-slate-400 italic pt-1 text-center border-t border-slate-800/80">
+                            Clique na barra para filtrar a relação nominal
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  }} 
+                />
+                <Bar 
+                  dataKey="impactoOperacional" 
+                  name="Impacto Operacional Real" 
+                  radius={[6, 6, 0, 0]}
+                >
+                  {dadosGraficoImpacto.map((entry) => (
+                    <Cell 
+                      key={`cell-op-${entry.mes}`} 
+                      fill={
+                        entry.impactoOperacional === kpisMesesRestantes.maxImpacto && entry.impactoOperacional > 0
+                          ? '#d97706' // Âmbar de alerta para mês com maior impacto
+                          : entry.isMesAtual
+                          ? '#047857' // Verde escuro para mês atual
+                          : '#059669' // Esmeralda padrão
+                      } 
+                    />
+                  ))}
+                </Bar>
+                <Bar 
+                  dataKey="descontados" 
+                  name="Descontados (Não-Operacionais)" 
+                  fill="#94a3b8" 
+                  radius={[6, 6, 0, 0]} 
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Cruzamento Setorial: Setores da Escala Mais Impactados nos Meses Restantes */}
+          {kpisMesesRestantes.topSetores.length > 0 && (
+            <div className="mt-5 pt-4 border-t border-line">
+              <div className="flex items-center justify-between gap-2 mb-2.5 flex-wrap">
+                <span className="text-xs font-bold text-ink flex items-center gap-1.5">
+                  <Layers size={14} className="text-emerald-800" />
+                  Cruzamento com a Escala: Setores mais desfalcados nos {chartViewMode === 'restantes' && selectedYear === currentYear ? 'meses restantes' : `meses de ${selectedYear}`}:
+                </span>
+                <span className="text-[11px] text-ink/50 font-mono">
+                  Identificados pela matrícula na Gestão de Efetivo
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {kpisMesesRestantes.topSetores.map(([setor, qtd]) => {
+                  const isDescontado = ['Administrativo', 'Expediente', 'Comandante', 'Subcomandante', 'Supervisor', 'LTS', 'À Disposição', 'P2', 'Armeiro', 'Reserva de Armamento'].some(s => setor.toUpperCase().includes(s.toUpperCase()));
+                  return (
+                    <div 
+                      key={setor}
+                      className={`px-3 py-1.5 rounded-xl border text-xs font-mono flex items-center gap-2 transition-all ${
+                        isDescontado
+                          ? 'bg-slate-100 border-slate-300 text-slate-700'
+                          : 'bg-emerald-50 border-emerald-200 text-emerald-950 font-semibold'
+                      }`}
+                    >
+                      <span className={`w-2 h-2 rounded-full ${isDescontado ? 'bg-slate-400' : 'bg-emerald-600'}`}></span>
+                      <span>{setor}:</span>
+                      <strong className={isDescontado ? 'text-slate-800' : 'text-emerald-800'}>{qtd} PM{qtd > 1 ? 's' : ''}</strong>
+                      {isDescontado && (
+                        <span className="text-[9px] bg-slate-200 px-1 rounded text-slate-600">Descontado</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -889,7 +1370,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
               <thead>
                 <tr className="border-b border-line bg-slate-100/80 text-[11px] font-bold text-ink/70 uppercase tracking-wider">
                   <th className="py-3 px-4">Posto / Militar</th>
-                  <th className="py-3 px-4">Serviço / Enquadramento</th>
+                  <th className="py-3 px-4">Setor na Escala / Cruzamento</th>
                   <th className="py-3 px-4">Matrícula</th>
                   <th className="py-3 px-4">Mês Previsto</th>
                   <th className="py-3 px-4">Período</th>
@@ -899,7 +1380,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
               </thead>
               <tbody className="divide-y divide-line">
                 {filteredFerias.map((item) => {
-                  const check = checkMilitarNaoOperacional(item, efetivo);
+                  const cruzamento = getCruzamentoMilitar(item, efetivo);
                   return (
                   <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="py-3 px-4">
@@ -919,23 +1400,40 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
                     </td>
 
                     <td className="py-3 px-4">
-                      {check.isNaoOperacional ? (
-                        <span 
-                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-100 text-amber-900 border border-amber-300"
-                          title={`Descontado do impacto operacional de rua: ${check.categoria}${check.detalhe ? ` (${check.detalhe})` : ''}`}
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
-                          {check.categoria}
-                        </span>
-                      ) : (
-                        <span 
-                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-100 text-emerald-900 border border-emerald-300"
-                          title="Militar do serviço operacional de rua / rádio-patrulha"
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
-                          Operacional
-                        </span>
-                      )}
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {cruzamento.isNaoOperacional ? (
+                            <span 
+                              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-100 text-amber-900 border border-amber-300"
+                              title={`Descontado do impacto operacional de rua: ${cruzamento.categoriaNaoOperacional}${cruzamento.detalheSetor ? ` (${cruzamento.detalheSetor})` : ''}`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
+                              Descontado ({cruzamento.categoriaNaoOperacional})
+                            </span>
+                          ) : (
+                            <span 
+                              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-100 text-emerald-900 border border-emerald-300"
+                              title="Militar do serviço operacional de viaturas / rádio-patrulha"
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+                              Operacional de Rua
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="text-[11px] font-mono text-ink/80 flex items-center gap-1">
+                          <Layers size={11} className="text-emerald-800 shrink-0" />
+                          <span className="font-semibold text-ink">{cruzamento.setorEscala}</span>
+                          {cruzamento.encontradoNoEfetivo && (
+                            <span 
+                              className="inline-flex items-center text-[9px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1 rounded font-mono"
+                              title="Cruzado com sucesso pela matrícula na Gestão de Efetivo"
+                            >
+                              <CheckCircle2 size={9} className="mr-0.5 text-emerald-600" /> Matrícula OK
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </td>
 
                     <td className="py-3 px-4 font-mono font-semibold text-ink/70">
@@ -953,6 +1451,11 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
                       <div className="text-ink font-mono font-semibold">
                         {item.periodoDias || 30} dias
                       </div>
+                      {item.anoReferencia && (
+                        <div className="text-[10px] font-mono text-amber-900 bg-amber-50 border border-amber-200/80 px-1.5 py-0.2 rounded inline-block mt-0.5">
+                          Exercício: {item.anoReferencia}
+                        </div>
+                      )}
                       {item.dataInicio && item.dataFim && (
                         <div className="text-[10px] text-ink/50">
                           {item.dataInicio} até {item.dataFim}

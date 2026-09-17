@@ -136,8 +136,9 @@ export interface PrevisaoFerias {
   nomeGuerra?: string;
   posto: PostoGraduacao;
   ano: number;
+  anoReferencia?: number; // Ano a que a férias se refere (Coluna L)
   mesPrevisto: MesAno | string;
-  periodoDias?: number; // 30, 15, etc.
+  periodoDias?: number; // 30, 15, etc. (Coluna M)
   dataInicio?: string;
   dataFim?: string;
   situacao: 'Prevista' | 'Em Gozo' | 'Concluída' | 'Interrompida';
