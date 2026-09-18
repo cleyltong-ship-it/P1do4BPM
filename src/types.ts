@@ -129,6 +129,13 @@ export type MesAno =
   | 'Novembro'
   | 'Dezembro';
 
+export type CategoriaEscalaFerias = 
+  | 'Operacional'
+  | 'Administrativo'
+  | 'P2'
+  | 'Oficiais'
+  | 'À Disposição';
+
 export interface PrevisaoFerias {
   id: string;
   matricula: string;
@@ -143,4 +150,5 @@ export interface PrevisaoFerias {
   dataFim?: string;
   situacao: 'Prevista' | 'Em Gozo' | 'Concluída' | 'Interrompida';
   observacao?: string;
+  categoria?: CategoriaEscalaFerias; // Classificação manual: Operacional, Administrativo, P2, Oficiais, À Disposição
 }

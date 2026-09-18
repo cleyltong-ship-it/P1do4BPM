@@ -30,6 +30,23 @@ export function generateDefaultFerias(efetivo: EfetivoMilitar[]): PrevisaoFerias
       situacao = 'Concluída';
     }
 
+    const posto = m.postoGraduacao || '';
+    const isOficial = ['Cel', 'Ten-Cel', 'Maj', 'Cap', '1º Ten', '2º Ten'].includes(posto);
+    const sitUpper = (m.situacao || '').toUpperCase();
+    const funcUpper = (m.funcao || '').toUpperCase();
+    const locUpper = (m.localEscala || '').toUpperCase();
+
+    let initialCat: PrevisaoFerias['categoria'] = 'Operacional';
+    if (isOficial) {
+      initialCat = 'Oficiais';
+    } else if (sitUpper.includes('ADMIN') || funcUpper.includes('ADMIN') || locUpper.includes('ADMIN') || m.escalaTipo === 'ADMIN') {
+      initialCat = 'Administrativo';
+    } else if (sitUpper.includes('DISPOSIC') || funcUpper.includes('DISPOSIC') || sitUpper === 'AD') {
+      initialCat = 'À Disposição';
+    } else if (funcUpper.includes('P2') || sitUpper.includes('P2') || locUpper.includes('P2')) {
+      initialCat = 'P2';
+    }
+
     result.push({
       id: `FERIAS-${m.matricula}-${currentYear}-${idx + 1}`,
       matricula: m.matricula,
@@ -42,6 +59,7 @@ export function generateDefaultFerias(efetivo: EfetivoMilitar[]): PrevisaoFerias
       dataInicio: `${currentYear}-${String(monthIndex + 1).padStart(2, '0')}-01`,
       dataFim: `${currentYear}-${String(monthIndex + 1).padStart(2, '0')}-30`,
       situacao,
+      categoria: initialCat,
       observacao: idx % 4 === 0 ? 'Período regular regulamentar' : undefined
     });
   });

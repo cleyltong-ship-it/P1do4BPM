@@ -16,13 +16,16 @@ import {
   Edit3, 
   Trash2, 
   X,
-  Building2,
   CalendarRange,
   ShieldAlert,
   BarChart3,
   TrendingUp,
   Layers,
   Sparkles,
+  Shield,
+  Building,
+  Eye,
+  Star,
   Check
 } from 'lucide-react';
 import {
@@ -40,283 +43,116 @@ import {
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { PrevisaoFerias, MesAno, EfetivoMilitar, PostoGraduacao } from '../types';
+import { PrevisaoFerias, MesAno, EfetivoMilitar, PostoGraduacao, CategoriaEscalaFerias } from '../types';
 import { MESES_DO_ANO } from '../services/feriasFileParser';
 import { ImportFeriasModal } from './ImportFeriasModal';
 
-// Categorias excluídas do cálculo do impacto no serviço operacional
-export type CategoriaNaoOperacional = 
-  | 'Administrativo' 
-  | 'Comandante da Base Comunitária'
-  | 'Supervisor' 
-  | 'Comandante' 
-  | 'Subcomandante' 
-  | 'LTS' 
-  | 'À Disposição';
+export type CategoriaDesconto = 'Administrativo' | 'P2' | 'Oficiais' | 'À Disposição';
 
-export interface NaoOperacionalInfo {
-  isNaoOperacional: boolean;
-  categoria?: CategoriaNaoOperacional;
-  detalhe?: string;
-}
+export const CATEGORIAS_CONFIG: Record<CategoriaEscalaFerias, {
+  id: CategoriaEscalaFerias;
+  label: string;
+  isDescontado: boolean;
+  cor: string;
+  badgeBg: string;
+  badgeBorder: string;
+  badgeText: string;
+  shortLabel: string;
+}> = {
+  'Operacional': {
+    id: 'Operacional',
+    label: 'Operacional (Rua / VTR)',
+    isDescontado: false,
+    cor: '#059669',
+    badgeBg: 'bg-emerald-50',
+    badgeBorder: 'border-emerald-300',
+    badgeText: 'text-emerald-950',
+    shortLabel: 'Operacional'
+  },
+  'Administrativo': {
+    id: 'Administrativo',
+    label: 'Administrativo',
+    isDescontado: true,
+    cor: '#d97706',
+    badgeBg: 'bg-amber-50',
+    badgeBorder: 'border-amber-300',
+    badgeText: 'text-amber-950',
+    shortLabel: 'Administrativo'
+  },
+  'P2': {
+    id: 'P2',
+    label: 'P2 (Inteligência)',
+    isDescontado: true,
+    cor: '#7c3aed',
+    badgeBg: 'bg-purple-50',
+    badgeBorder: 'border-purple-300',
+    badgeText: 'text-purple-950',
+    shortLabel: 'P2'
+  },
+  'Oficiais': {
+    id: 'Oficiais',
+    label: 'Oficiais',
+    isDescontado: true,
+    cor: '#2563eb',
+    badgeBg: 'bg-blue-50',
+    badgeBorder: 'border-blue-300',
+    badgeText: 'text-blue-950',
+    shortLabel: 'Oficiais'
+  },
+  'À Disposição': {
+    id: 'À Disposição',
+    label: 'À Disposição',
+    isDescontado: true,
+    cor: '#64748b',
+    badgeBg: 'bg-slate-100',
+    badgeBorder: 'border-slate-300',
+    badgeText: 'text-slate-900',
+    shortLabel: 'À Disposição'
+  }
+};
 
 /**
- * Busca de forma segura o militar no cadastro do efetivo por matrícula ou nome
+ * Obtém a categoria direta do militar.
+ * Se o registro ainda não tiver a categoria explicitamente gravada,
+ * aplica uma detecção inicial sugerida com base em posto ou observação.
  */
-export function findMilitarInEfetivo(
-  item: PrevisaoFerias, 
-  efetivo: EfetivoMilitar[]
-): EfetivoMilitar | undefined {
-  const norm = (str?: string) => 
-    (str || '')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toUpperCase()
-      .trim();
+export function getMilitarCategoria(item: PrevisaoFerias): CategoriaEscalaFerias {
+  if (item.categoria) {
+    return item.categoria;
+  }
+  
+  const posto = (item.posto || '').toLowerCase();
+  const obs = (item.observacao || '').toLowerCase();
 
-  const cleanDigits = (s?: string) => (s || '').replace(/\D/g, '');
-  const itemMatDigits = cleanDigits(item.matricula);
-
-  // 1. Cruzamento prioritário pela Matrícula (chave única do militar)
-  let m = efetivo.find(e => {
-    if (itemMatDigits && itemMatDigits.length >= 4 && cleanDigits(e.matricula) === itemMatDigits) return true;
-    if (e.matricula && item.matricula && e.matricula.trim().toLowerCase() === item.matricula.trim().toLowerCase()) return true;
-    return false;
-  });
-
-  // 2. Fallback de correspondência segura por nome
-  if (!m && item.nome) {
-    const itemNome = norm(item.nome);
-    // Correspondência exata de nome completo
-    m = efetivo.find(e => norm(e.nomeCompleto) === itemNome);
-
-    // Correspondência por primeiro e último nome (apenas quando ambos possuem 2 ou mais nomes)
-    if (!m) {
-      const itemParts = itemNome.split(/\s+/).filter(Boolean);
-      if (itemParts.length >= 2) {
-        const first = itemParts[0];
-        const last = itemParts[itemParts.length - 1];
-        if (first.length >= 3 && last.length >= 3) {
-          m = efetivo.find(e => {
-            const eParts = norm(e.nomeCompleto).split(/\s+/).filter(Boolean);
-            return eParts.length >= 2 && eParts[0] === first && eParts[eParts.length - 1] === last;
-          });
-        }
-      }
-    }
-
-    // Se o item contém apenas 1 palavra (ex: nome de guerra "ROCHA"), buscar no nome de guerra
-    if (!m) {
-      const itemParts = itemNome.split(/\s+/).filter(Boolean);
-      if (itemParts.length === 1 && itemParts[0].length >= 3) {
-        m = efetivo.find(e => norm(e.nomeGuerra) === itemParts[0]);
-      }
-    }
+  if (obs.includes('p2') || obs.includes('p/2') || obs.includes('inteligência') || obs.includes('inteligencia')) {
+    return 'P2';
+  }
+  if (obs.includes('disposição') || obs.includes('disposicao') || obs.includes('adido') || obs === 'ad') {
+    return 'À Disposição';
+  }
+  if (obs.includes('admin') || obs.includes('expediente') || obs.includes('secretaria') || obs.includes('armeiro') || obs.includes('reserva')) {
+    return 'Administrativo';
+  }
+  if (
+    posto.includes('cel') || 
+    posto.includes('maj') || 
+    posto.includes('cap') || 
+    posto.includes('1º ten') || 
+    posto.includes('2º ten') || 
+    posto.includes('tenente') ||
+    posto === 'oficial' ||
+    obs.includes('oficial') ||
+    obs.includes('cmt') ||
+    obs.includes('comandante')
+  ) {
+    return 'Oficiais';
   }
 
-  // 3. Fallback por nome de guerra se fornecido no item
-  if (!m && item.nomeGuerra) {
-    const itemGuerra = norm(item.nomeGuerra);
-    m = efetivo.find(e => norm(e.nomeGuerra) === itemGuerra);
-  }
-
-  return m;
+  return 'Operacional';
 }
 
-/**
- * Identifica se o militar pertence a uma das categorias não-operacionais:
- * "Administrativo", "Comandante da Base Comunitária", "Supervisor", "Comandante", "Subcomandante", "LTS" e "À Disposição".
- * Esses militares não compõem a escala básica de guarnições/viaturas de rua,
- * de modo que sua fruição de férias é retirada do cálculo de desfalque operacional de rua e do gráfico.
- */
-export function checkMilitarNaoOperacional(
-  item: PrevisaoFerias, 
-  efetivo: EfetivoMilitar[],
-  matchedMilitar?: EfetivoMilitar
-): NaoOperacionalInfo {
-  const norm = (str?: string) => 
-    (str || '')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toUpperCase()
-      .trim();
-
-  const m = matchedMilitar || findMilitarInEfetivo(item, efetivo);
-
-  const situacao = norm(m?.situacao);
-  const localEscala = norm(m?.localEscala);
-  const funcao = norm(m?.funcao);
-  const escalaTipo = norm(m?.escalaTipo);
-  const posto = norm(item.posto || m?.postoGraduacao);
-  const obs = norm(item.observacao || m?.observacao);
-  const nomeGuerra = norm(item.nomeGuerra || m?.nomeGuerra);
-  const nomeCompleto = norm(item.nome || m?.nomeCompleto);
-
-  // 1. Comandante da Base Comunitária (Escala 05 / Sgt Dayse / Cmt Base Comunitária)
-  const isCmtBase = 
-    situacao === 'COMANDANTE DA BASE COMUNITARIA' ||
-    localEscala === 'COMANDANTE DA BASE COMUNITARIA' ||
-    funcao === 'COMANDANTE DA BASE COMUNITARIA' ||
-    (situacao.includes('BASE COMUNITARIA') && (situacao.includes('COMANDANTE') || situacao.includes('CMT'))) ||
-    (localEscala.includes('BASE COMUNITARIA') && (localEscala.includes('COMANDANTE') || localEscala.includes('CMT'))) ||
-    (funcao.includes('BASE COMUNITARIA') && (funcao.includes('COMANDANTE') || funcao.includes('CMT'))) ||
-    (obs.includes('BASE COMUNITARIA') && (obs.includes('COMANDANTE') || obs.includes('CMT'))) ||
-    ((nomeGuerra.includes('DAYSE') || nomeCompleto.includes('DAYSE')) && 
-      (localEscala.includes('BASE') || situacao.includes('BASE') || funcao.includes('BASE') || !localEscala || localEscala === 'Solo'));
-
-  if (isCmtBase) {
-    return { 
-      isNaoOperacional: true, 
-      categoria: 'Comandante da Base Comunitária', 
-      detalhe: m?.localEscala || m?.funcao || m?.situacao || 'Comandante da Base Comunitária' 
-    };
-  }
-
-  // 2. Administrativo (Escala 04, P1, P2, P3, P4, P5, Expediente, Secretaria, Armeiro, Reserva de Armamento)
-  const isAdmin = 
-    situacao === 'ADMINISTRATIVO' ||
-    localEscala === 'ADMINISTRATIVO' ||
-    funcao === 'ADMINISTRATIVO' ||
-    situacao.includes('ADMIN') || 
-    localEscala.includes('ADMIN') ||
-    funcao.includes('ADMIN') || 
-    situacao.includes('EXPEDIENTE') ||
-    localEscala.includes('EXPEDIENTE') ||
-    funcao.includes('EXPEDIENTE') ||
-    situacao.includes('ARMEIRO') ||
-    localEscala.includes('ARMEIRO') ||
-    funcao.includes('ARMEIRO') ||
-    situacao.includes('RESERVA DE ARMAMENTO') ||
-    localEscala.includes('RESERVA DE ARMAMENTO') ||
-    funcao.includes('RESERVA DE ARMAMENTO') ||
-    funcao.includes('P1') || 
-    funcao.includes('P2') || 
-    funcao.includes('P3') || 
-    funcao.includes('P4') || 
-    funcao.includes('P5') || 
-    funcao.includes('ESTADO-MAIOR') || 
-    funcao.includes('ESTADO MAIOR') || 
-    funcao.includes('SEDE') || 
-    funcao.includes('SECRETARIA') || 
-    funcao.includes('TESOURARIA') || 
-    funcao.includes('SARGENTEANTE') ||
-    escalaTipo === 'ADMIN' || 
-    escalaTipo === 'EXPEDIENTE' || 
-    obs.includes('ADMIN');
-
-  if (isAdmin) {
-    return { 
-      isNaoOperacional: true, 
-      categoria: 'Administrativo', 
-      detalhe: m?.localEscala || m?.funcao || m?.situacao || 'Administrativo' 
-    };
-  }
-
-  // 3. LTS (Licença para Tratamento de Saúde / Atestados Médicos)
-  if (
-    situacao.includes('LTS') || 
-    funcao.includes('LTS') || 
-    obs.includes('LTS') || 
-    situacao.includes('MEDIC') || 
-    obs.includes('ATESTADO') ||
-    situacao.includes('SAUDE')
-  ) {
-    return { isNaoOperacional: true, categoria: 'LTS', detalhe: m?.situacao || 'LTS' };
-  }
-
-  // 4. À Disposição (Adido, AD, outro órgão)
-  if (
-    situacao.includes('DISPOSIC') || 
-    situacao === 'AD' || 
-    funcao.includes('DISPOSIC') || 
-    obs.includes('DISPOSIC') || 
-    obs === 'AD'
-  ) {
-    return { isNaoOperacional: true, categoria: 'À Disposição', detalhe: m?.situacao || 'À Disposição' };
-  }
-
-  // 5. Subcomandante (verificado antes de Comandante para evitar falso-positivo)
-  if (
-    funcao.includes('SUBCOMANDANTE') || 
-    funcao.includes('SUB COMANDANTE') || 
-    funcao.includes('SUB-COMANDANTE') || 
-    funcao.includes('SUBCMD') || 
-    obs.includes('SUBCOMANDANTE')
-  ) {
-    return { isNaoOperacional: true, categoria: 'Subcomandante', detalhe: m?.funcao || 'Subcomandante' };
-  }
-
-  // 6. Comandante (Comandante de Batalhão, Cia, Oficiais de Comando, etc.)
-  if (
-    funcao.includes('COMANDANTE') || 
-    funcao.includes('CMT') || 
-    funcao.includes('OFICIAL / COMANDO') || 
-    obs.includes('COMANDANTE') || 
-    ['CEL', 'TEN-CEL', 'MAJ'].includes(posto)
-  ) {
-    return { isNaoOperacional: true, categoria: 'Comandante', detalhe: m?.funcao || `${posto} / Comando` };
-  }
-
-  // 7. Supervisor (Supervisores de Oficial, Supervisão de área, Auxiliar do Oficial de Operações)
-  if (
-    funcao.includes('SUPERVISOR') || 
-    funcao.includes('SUPERVISAO') || 
-    funcao.includes('AUX. DO OF') ||
-    funcao.includes('AUXILIAR DO SUPERVISOR') ||
-    situacao.includes('SUPERVISOR') ||
-    situacao.includes('AUX. DO OF') ||
-    situacao.includes('AUXILIAR DO SUPERVISOR') ||
-    obs.includes('SUPERVISOR')
-  ) {
-    return { isNaoOperacional: true, categoria: 'Supervisor', detalhe: m?.funcao || m?.situacao || 'Supervisor' };
-  }
-
-  return { isNaoOperacional: false };
-}
-
-export interface CruzamentoMilitarInfo {
-  militar?: EfetivoMilitar;
-  encontradoNoEfetivo: boolean;
-  matricula: string;
-  setorEscala: string;
-  isNaoOperacional: boolean;
-  categoriaNaoOperacional?: CategoriaNaoOperacional;
-  detalheSetor: string;
-  escalaTipo?: string;
-  funcao?: string;
-}
-
-/**
- * Realiza o cruzamento de dados entre a relação de Férias e a Gestão de Efetivo
- * utilizando a MATRÍCULA como identificador primário, resgatando o setor na escala
- * (Solo, Força Tática, Base Comunitária, Administrativo, etc.) e classificando o impacto operacional real.
- */
-export function getCruzamentoMilitar(
-  item: PrevisaoFerias, 
-  efetivo: EfetivoMilitar[]
-): CruzamentoMilitarInfo {
-  const m = findMilitarInEfetivo(item, efetivo);
-  const check = checkMilitarNaoOperacional(item, efetivo, m);
-
-  // Setor ou local da escala resgatado da Gestão de Efetivo
-  let setor = 'Operacional de Rua';
-  if (m) {
-    setor = m.localEscala || m.situacao || m.funcao || 'Operacional de Rua';
-  } else if (check.isNaoOperacional && check.categoria) {
-    setor = check.categoria;
-  }
-
-  return {
-    militar: m,
-    encontradoNoEfetivo: !!m,
-    matricula: item.matricula,
-    setorEscala: setor,
-    isNaoOperacional: check.isNaoOperacional,
-    categoriaNaoOperacional: check.categoria,
-    detalheSetor: check.detalhe || setor,
-    escalaTipo: m?.escalaTipo,
-    funcao: m?.funcao
-  };
+export function isDescontadoOperacional(cat: CategoriaEscalaFerias): boolean {
+  return cat !== 'Operacional';
 }
 
 interface GestaoFeriasProps {
@@ -335,15 +171,15 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
   onAddFerias,
   onUpdateFerias,
   onDeleteFerias,
-  onImportFerias,
-  onOpenImportEscalaPdf
+  onImportFerias
 }) => {
   const [selectedMonth, setSelectedMonth] = useState<string>('TODOS');
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<string>('TODOS');
+  const [selectedCategoriaFilter, setSelectedCategoriaFilter] = useState<string>('TODOS');
   const [chartViewMode, setChartViewMode] = useState<'restantes' | 'todos'>('restantes');
-  // Visualização da relação nominal: 'operacional' (retira Administrativo e Cmt Base), 'todos' (geral), ou 'descontados'
+  // Visualização da relação nominal: 'operacional' (apenas rua), 'todos' (geral), ou 'descontados' (admin/p2/oficiais/ad)
   const [tableRosterView, setTableRosterView] = useState<'operacional' | 'todos' | 'descontados'>('operacional');
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -358,138 +194,15 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
   const [formDataInicio, setFormDataInicio] = useState('');
   const [formDataFim, setFormDataFim] = useState('');
   const [formSituacao, setFormSituacao] = useState<PrevisaoFerias['situacao']>('Prevista');
+  const [formCategoria, setFormCategoria] = useState<CategoriaEscalaFerias>('Operacional');
   const [formObs, setFormObs] = useState('');
 
   const currentMonthIndex = new Date().getMonth();
   const currentMonthName = MESES_DO_ANO[currentMonthIndex];
-
-  // Levantamento dos militares nas escalas específicas do efetivo do batalhão
-  const efetivoBatalhaoStats = useMemo(() => {
-    let adminCount = 0;
-    let cmtBaseCount = 0;
-    let baseComunitariaCount = 0;
-
-    efetivo.forEach(m => {
-      const sit = (m.situacao || '').toUpperCase();
-      const local = (m.localEscala || '').toUpperCase();
-      const func = (m.funcao || '').toUpperCase();
-      const guerra = (m.nomeGuerra || '').toUpperCase();
-
-      if (
-        sit === 'COMANDANTE DA BASE COMUNITARIA' || 
-        local === 'COMANDANTE DA BASE COMUNITARIA' || 
-        func === 'COMANDANTE DA BASE COMUNITARIA' ||
-        ((sit.includes('BASE') || local.includes('BASE') || func.includes('BASE')) && (sit.includes('COMANDANTE') || local.includes('COMANDANTE') || func.includes('COMANDANTE') || sit.includes('CMT'))) ||
-        guerra.includes('DAYSE')
-      ) {
-        cmtBaseCount++;
-      } else if (
-        sit.includes('ADMIN') || 
-        local.includes('ADMIN') || 
-        func.includes('ADMIN') || 
-        sit.includes('EXPEDIENTE') || 
-        local.includes('EXPEDIENTE') ||
-        sit.includes('ARMEIRO') ||
-        local.includes('ARMEIRO') ||
-        sit.includes('RESERVA DE ARMAMENTO') ||
-        local.includes('RESERVA DE ARMAMENTO') ||
-        func.includes('P1') || func.includes('P2') || func.includes('P3') || func.includes('P4') || func.includes('P5')
-      ) {
-        adminCount++;
-      } else if (sit.includes('BASE COMUNITARIA') || local.includes('BASE COMUNITARIA')) {
-        baseComunitariaCount++;
-      }
-    });
-
-    return {
-      adminCount,
-      cmtBaseCount,
-      baseComunitariaCount,
-      totalEfetivo: efetivo.length
-    };
-  }, [efetivo]);
-
-  // Count by month for the selected year
-  const countByMonth = useMemo(() => {
-    const counts: Record<string, number> = {};
-    MESES_DO_ANO.forEach(m => {
-      counts[m] = 0;
-    });
-
-    ferias.forEach(f => {
-      if (f.ano === selectedYear && counts[f.mesPrevisto] !== undefined) {
-        counts[f.mesPrevisto]++;
-      }
-    });
-
-    return counts;
-  }, [ferias, selectedYear]);
-
-  // Férias elegíveis pelo filtro de Ano, Mês e Status
-  const baseMonthFerias = useMemo(() => {
-    return ferias.filter(item => {
-      if (item.ano !== selectedYear) return false;
-      if (selectedMonth !== 'TODOS' && item.mesPrevisto !== selectedMonth) return false;
-      if (selectedStatus !== 'TODOS' && item.situacao !== selectedStatus) return false;
-      return true;
-    });
-  }, [ferias, selectedYear, selectedMonth, selectedStatus]);
-
-  // Contagens para os botões de alternância da visualização
-  const countOperacionaisFiltro = useMemo(() => {
-    return baseMonthFerias.filter(item => !getCruzamentoMilitar(item, efetivo).isNaoOperacional).length;
-  }, [baseMonthFerias, efetivo]);
-
-  const countDescontadosFiltro = useMemo(() => {
-    return baseMonthFerias.filter(item => getCruzamentoMilitar(item, efetivo).isNaoOperacional).length;
-  }, [baseMonthFerias, efetivo]);
-
-  // Filtered list para a tabela (com retirada opcional dos não operacionais)
-  const filteredFerias = useMemo(() => {
-    return baseMonthFerias.filter(item => {
-      const cruzamento = getCruzamentoMilitar(item, efetivo);
-
-      // Se a visualização for 'operacional', retira Administrativo e Comandante da Base Comunitária (e outros não-operacionais)
-      if (tableRosterView === 'operacional' && cruzamento.isNaoOperacional) {
-        return false;
-      }
-      // Se for 'descontados', mostra apenas quem foi retirado da escala operacional
-      if (tableRosterView === 'descontados' && !cruzamento.isNaoOperacional) {
-        return false;
-      }
-
-      if (searchTerm.trim()) {
-        const term = searchTerm.toLowerCase();
-        const mat = (item.matricula || '').toLowerCase();
-        const nome = (item.nome || '').toLowerCase();
-        const guerra = (item.nomeGuerra || '').toLowerCase();
-        const posto = (item.posto || '').toLowerCase();
-        // Buscar também pelo nome completo do militar cadastrado no efetivo
-        const m = findMilitarInEfetivo(item, efetivo);
-        const nomeCompletoEfetivo = (m?.nomeCompleto || '').toLowerCase();
-        const setor = (cruzamento.setorEscala || '').toLowerCase();
-        const cat = (cruzamento.categoriaNaoOperacional || '').toLowerCase();
-
-        if (
-          !mat.includes(term) && 
-          !nome.includes(term) && 
-          !nomeCompletoEfetivo.includes(term) && 
-          !guerra.includes(term) && 
-          !posto.includes(term) &&
-          !setor.includes(term) &&
-          !cat.includes(term)
-        ) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-  }, [baseMonthFerias, tableRosterView, searchTerm, efetivo]);
+  const currentYear = new Date().getFullYear();
 
   // Quick stats
   const totalAno = ferias.filter(f => f.ano === selectedYear).length;
-  const currentYear = new Date().getFullYear();
   
   // Em Gozo Atualmente - Quantidade referente ao mês atual
   const emGozoCount = ferias.filter(f => {
@@ -519,7 +232,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
     }).length;
   }, [ferias, selectedYear, currentYear, currentMonthIndex]);
 
-  // Férias Concluídas: meses anteriores ao atual no ano corrente, ou anos passados, ou com status 'Concluída'
+  // Férias Concluídas
   const concluidasCount = useMemo(() => {
     return ferias.filter(f => {
       if (f.ano !== selectedYear) return false;
@@ -537,27 +250,26 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
     }).length;
   }, [ferias, selectedYear, currentYear, currentMonthIndex]);
 
-  // Estatísticas operacionais por mês: levantamento de todos de férias por mês, retirando Administrativo e Comandante da Base Comunitária
+  // Estatísticas de Férias por Mês: Levantamento total e dedução de Administrativo, P2, Oficiais e À Disposição
   const monthlyOperationalStats = useMemo(() => {
     const stats: Record<string, { 
       total: number; 
-      naoOperacionais: number; 
+      operacional: number;
+      descontados: number; 
       impactoOperacional: number; 
-      porCategoria: Record<CategoriaNaoOperacional, number> 
+      porCategoria: Record<CategoriaDesconto, number>;
     }> = {};
 
     MESES_DO_ANO.forEach(m => {
       stats[m] = {
         total: 0,
-        naoOperacionais: 0,
+        operacional: 0,
+        descontados: 0,
         impactoOperacional: 0,
         porCategoria: {
           'Administrativo': 0,
-          'Comandante da Base Comunitária': 0,
-          'Supervisor': 0,
-          'Comandante': 0,
-          'Subcomandante': 0,
-          'LTS': 0,
+          'P2': 0,
+          'Oficiais': 0,
           'À Disposição': 0
         }
       };
@@ -569,67 +281,71 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
       if (!stats[m]) return;
 
       stats[m].total++;
-      const check = checkMilitarNaoOperacional(f, efetivo);
-      if (check.isNaoOperacional && check.categoria) {
-        stats[m].naoOperacionais++;
-        stats[m].porCategoria[check.categoria] = (stats[m].porCategoria[check.categoria] || 0) + 1;
+      const cat = getMilitarCategoria(f);
+      if (cat === 'Operacional') {
+        stats[m].operacional++;
+      } else {
+        stats[m].descontados++;
+        stats[m].porCategoria[cat] = (stats[m].porCategoria[cat] || 0) + 1;
       }
     });
 
     MESES_DO_ANO.forEach(m => {
-      stats[m].impactoOperacional = Math.max(0, stats[m].total - stats[m].naoOperacionais);
+      stats[m].impactoOperacional = stats[m].operacional;
     });
 
     return stats;
-  }, [ferias, efetivo, selectedYear]);
+  }, [ferias, selectedYear]);
 
-  // Estatísticas operacionais consolidadas do filtro de mês selecionado
+  // Estatísticas consolidadas do filtro de mês selecionado
   const currentSelectedStats = useMemo(() => {
     if (selectedMonth === 'TODOS') {
       let total = 0;
-      let naoOperacionais = 0;
-      const porCategoria: Record<CategoriaNaoOperacional, number> = {
+      let operacional = 0;
+      let descontados = 0;
+      const porCategoria: Record<CategoriaDesconto, number> = {
         'Administrativo': 0,
-        'Comandante da Base Comunitária': 0,
-        'Supervisor': 0,
-        'Comandante': 0,
-        'Subcomandante': 0,
-        'LTS': 0,
+        'P2': 0,
+        'Oficiais': 0,
         'À Disposição': 0
       };
 
-      MESES_DO_ANO.forEach(m => {
-        const s = monthlyOperationalStats[m];
-        if (s) {
-          total += s.total;
-          naoOperacionais += s.naoOperacionais;
-          (Object.keys(s.porCategoria) as CategoriaNaoOperacional[]).forEach(cat => {
-            porCategoria[cat] = (porCategoria[cat] || 0) + s.porCategoria[cat];
-          });
-        }
+      (Object.values(monthlyOperationalStats) as Array<{
+        total: number;
+        operacional: number;
+        descontados: number;
+        impactoOperacional: number;
+        porCategoria: Record<CategoriaDesconto, number>;
+      }>).forEach(s => {
+        total += s.total;
+        operacional += s.operacional;
+        descontados += s.descontados;
+        porCategoria['Administrativo'] += s.porCategoria['Administrativo'];
+        porCategoria['P2'] += s.porCategoria['P2'];
+        porCategoria['Oficiais'] += s.porCategoria['Oficiais'];
+        porCategoria['À Disposição'] += s.porCategoria['À Disposição'];
       });
 
       return {
         monthLabel: 'Todos os Meses',
         isAll: true,
         total,
-        naoOperacionais,
-        impactoOperacional: Math.max(0, total - naoOperacionais),
+        operacional,
+        descontados,
+        impactoOperacional: operacional,
         porCategoria
       };
     }
 
     const s = monthlyOperationalStats[selectedMonth] || {
       total: 0,
-      naoOperacionais: 0,
+      operacional: 0,
+      descontados: 0,
       impactoOperacional: 0,
       porCategoria: {
         'Administrativo': 0,
-        'Comandante da Base Comunitária': 0,
-        'Supervisor': 0,
-        'Comandante': 0,
-        'Subcomandante': 0,
-        'LTS': 0,
+        'P2': 0,
+        'Oficiais': 0,
         'À Disposição': 0
       }
     };
@@ -638,8 +354,9 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
       monthLabel: selectedMonth,
       isAll: false,
       total: s.total,
-      naoOperacionais: s.naoOperacionais,
-      impactoOperacional: s.impactoOperacional,
+      operacional: s.operacional,
+      descontados: s.descontados,
+      impactoOperacional: s.operacional,
       porCategoria: s.porCategoria
     };
   }, [selectedMonth, monthlyOperationalStats]);
@@ -647,11 +364,9 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
   // Meses restantes ou ano completo para o gráfico de barras
   const mesesParaGrafico = useMemo(() => {
     if (selectedYear > currentYear) {
-      // Ano futuro: todos os 12 meses são restantes
       return MESES_DO_ANO;
     } else if (selectedYear === currentYear) {
       if (chartViewMode === 'restantes') {
-        // Do mês atual até dezembro (ex: Setembro a Dezembro)
         return MESES_DO_ANO.slice(currentMonthIndex);
       }
       return MESES_DO_ANO;
@@ -660,82 +375,48 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
     }
   }, [selectedYear, currentYear, currentMonthIndex, chartViewMode]);
 
-  // Cruzamento detalhado de informações com a Gestão de Efetivo por Matrícula para o gráfico
+  // Dados para o Gráfico de Impacto Operacional
   const dadosGraficoImpacto = useMemo(() => {
     return mesesParaGrafico.map(mes => {
-      const feriasDoMes = ferias.filter(f => f.ano === selectedYear && f.mesPrevisto === mes);
-      
-      let impactoOperacional = 0;
-      let descontados = 0;
-      const setoresCounts: Record<string, number> = {};
-      const categoriasDesconto: Record<string, number> = {};
+      const s = monthlyOperationalStats[mes] || {
+        total: 0,
+        operacional: 0,
+        descontados: 0,
+        impactoOperacional: 0,
+        porCategoria: { 'Administrativo': 0, 'P2': 0, 'Oficiais': 0, 'À Disposição': 0 }
+      };
 
-      feriasDoMes.forEach(f => {
-        const cruzamento = getCruzamentoMilitar(f, efetivo);
-        if (cruzamento.isNaoOperacional) {
-          descontados++;
-          const cat = cruzamento.categoriaNaoOperacional || 'Administrativo';
-          categoriasDesconto[cat] = (categoriasDesconto[cat] || 0) + 1;
-        } else {
-          impactoOperacional++;
-          const setor = cruzamento.setorEscala || 'Operacional de Rua';
-          setoresCounts[setor] = (setoresCounts[setor] || 0) + 1;
-        }
-      });
-
-      const mesIdx = MESES_DO_ANO.indexOf(mes);
+      const mesIdx = MESES_DO_ANO.indexOf(mes as MesAno);
       const isMesAtual = selectedYear === currentYear && mesIdx === currentMonthIndex;
-
-      const setoresTop = Object.entries(setoresCounts)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 4);
 
       return {
         mes,
         mesCurto: mes.slice(0, 3),
-        impactoOperacional,
-        descontados,
-        total: impactoOperacional + descontados,
+        impactoOperacional: s.impactoOperacional,
+        total: s.total,
+        descontados: s.descontados,
         isMesAtual,
-        setoresTop,
-        setoresCounts,
-        categoriasDesconto
+        porCategoria: s.porCategoria
       };
     });
-  }, [mesesParaGrafico, ferias, efetivo, selectedYear, currentYear, currentMonthIndex]);
+  }, [mesesParaGrafico, monthlyOperationalStats, selectedYear, currentYear, currentMonthIndex]);
 
-  // Indicadores consolidados dos meses restantes com cruzamento do efetivo
+  // Indicadores consolidados dos meses exibidos no gráfico
   const kpisMesesRestantes = useMemo(() => {
     let totalImpacto = 0;
     let totalDescontados = 0;
+    let totalGeral = 0;
     let maxImpacto = -1;
     let mesPico = '';
-    let vinculadosComEfetivo = 0;
-    let totalFeriasRestantes = 0;
-
-    const setoresRestantesTotais: Record<string, number> = {};
 
     dadosGraficoImpacto.forEach(d => {
       totalImpacto += d.impactoOperacional;
       totalDescontados += d.descontados;
-      totalFeriasRestantes += d.total;
+      totalGeral += d.total;
 
       if (d.impactoOperacional > maxImpacto) {
         maxImpacto = d.impactoOperacional;
         mesPico = d.mes;
-      }
-
-      Object.entries(d.setoresCounts).forEach(([setor, count]) => {
-        setoresRestantesTotais[setor] = (setoresRestantesTotais[setor] || 0) + Number(count || 0);
-      });
-    });
-
-    ferias.forEach(f => {
-      if (f.ano === selectedYear && mesesParaGrafico.includes(f.mesPrevisto as MesAno)) {
-        const c = getCruzamentoMilitar(f, efetivo);
-        if (c.encontradoNoEfetivo) {
-          vinculadosComEfetivo++;
-        }
       }
     });
 
@@ -743,26 +424,81 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
       ? Math.round((totalImpacto / dadosGraficoImpacto.length) * 10) / 10 
       : 0;
 
-    const taxaVinculo = totalFeriasRestantes > 0 
-      ? Math.round((vinculadosComEfetivo / totalFeriasRestantes) * 100) 
-      : 100;
-
-    const topSetores = Object.entries(setoresRestantesTotais)
-      .sort((a, b) => b[1] - a[1]);
-
     return {
       totalImpacto,
       totalDescontados,
-      totalGeral: totalFeriasRestantes,
+      totalGeral,
       mediaPorMes,
       mesPico: mesPico || 'Nenhum',
-      maxImpacto: maxImpacto > 0 ? maxImpacto : 0,
-      taxaVinculo,
-      vinculadosComEfetivo,
-      topSetores
+      maxImpacto: maxImpacto > 0 ? maxImpacto : 0
     };
-  }, [dadosGraficoImpacto, ferias, efetivo, selectedYear, mesesParaGrafico]);
+  }, [dadosGraficoImpacto]);
 
+  // Férias elegíveis pelo filtro de Ano, Mês e Status
+  const baseMonthFerias = useMemo(() => {
+    return ferias.filter(item => {
+      if (item.ano !== selectedYear) return false;
+      if (selectedMonth !== 'TODOS' && item.mesPrevisto !== selectedMonth) return false;
+      if (selectedStatus !== 'TODOS' && item.situacao !== selectedStatus) return false;
+      return true;
+    });
+  }, [ferias, selectedYear, selectedMonth, selectedStatus]);
+
+  // Contagens para os botões de alternância da visualização
+  const countOperacionaisFiltro = useMemo(() => {
+    return baseMonthFerias.filter(item => getMilitarCategoria(item) === 'Operacional').length;
+  }, [baseMonthFerias]);
+
+  const countDescontadosFiltro = useMemo(() => {
+    return baseMonthFerias.filter(item => getMilitarCategoria(item) !== 'Operacional').length;
+  }, [baseMonthFerias]);
+
+  // Lista filtrada para a tabela
+  const filteredFerias = useMemo(() => {
+    return baseMonthFerias.filter(item => {
+      const cat = getMilitarCategoria(item);
+      const isDescontado = cat !== 'Operacional';
+
+      // Filtro da aba principal (Operacional vs Todos vs Descontados)
+      if (tableRosterView === 'operacional' && isDescontado) {
+        return false;
+      }
+      if (tableRosterView === 'descontados' && !isDescontado) {
+        return false;
+      }
+
+      // Filtro de categoria específica no dropdown
+      if (selectedCategoriaFilter !== 'TODOS' && cat !== selectedCategoriaFilter) {
+        return false;
+      }
+
+      // Filtro de busca textual
+      if (searchTerm.trim()) {
+        const term = searchTerm.toLowerCase();
+        const mat = (item.matricula || '').toLowerCase();
+        const nome = (item.nome || '').toLowerCase();
+        const guerra = (item.nomeGuerra || '').toLowerCase();
+        const posto = (item.posto || '').toLowerCase();
+        const catStr = cat.toLowerCase();
+        const obs = (item.observacao || '').toLowerCase();
+
+        if (
+          !mat.includes(term) && 
+          !nome.includes(term) && 
+          !guerra.includes(term) && 
+          !posto.includes(term) &&
+          !catStr.includes(term) &&
+          !obs.includes(term)
+        ) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [baseMonthFerias, tableRosterView, selectedCategoriaFilter, searchTerm]);
+
+  // Handlers para adicionar/editar
   const handleOpenAdd = () => {
     setEditingItem(null);
     setFormMatricula('');
@@ -773,21 +509,22 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
     setFormDataInicio('');
     setFormDataFim('');
     setFormSituacao('Prevista');
+    setFormCategoria('Operacional');
     setFormObs('');
     setIsAddModalOpen(true);
   };
 
   const handleOpenEdit = (item: PrevisaoFerias) => {
-    const m = efetivo.find(e => e.matricula && item.matricula && e.matricula.trim() === item.matricula.trim());
     setEditingItem(item);
     setFormMatricula(item.matricula);
-    setFormNome(m?.nomeCompleto || item.nome);
-    setFormPosto(m?.postoGraduacao || item.posto);
+    setFormNome(item.nome);
+    setFormPosto(item.posto);
     setFormMes(item.mesPrevisto as MesAno);
     setFormDias(item.periodoDias || 30);
     setFormDataInicio(item.dataInicio || '');
     setFormDataFim(item.dataFim || '');
     setFormSituacao(item.situacao);
+    setFormCategoria(getMilitarCategoria(item));
     setFormObs(item.observacao || '');
     setIsAddModalOpen(true);
   };
@@ -798,6 +535,21 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
     if (m) {
       setFormNome(m.nomeCompleto);
       setFormPosto(m.postoGraduacao);
+      const isOficial = ['Cel', 'Ten-Cel', 'Maj', 'Cap', '1º Ten', '2º Ten'].includes(m.postoGraduacao);
+      const sitUpper = (m.situacao || '').toUpperCase();
+      const funcUpper = (m.funcao || '').toUpperCase();
+
+      if (isOficial) {
+        setFormCategoria('Oficiais');
+      } else if (sitUpper.includes('ADMIN') || funcUpper.includes('ADMIN') || m.escalaTipo === 'ADMIN') {
+        setFormCategoria('Administrativo');
+      } else if (sitUpper.includes('DISPOSIC') || funcUpper.includes('DISPOSIC')) {
+        setFormCategoria('À Disposição');
+      } else if (funcUpper.includes('P2') || sitUpper.includes('P2')) {
+        setFormCategoria('P2');
+      } else {
+        setFormCategoria('Operacional');
+      }
     }
   };
 
@@ -815,6 +567,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
         dataInicio: formDataInicio || undefined,
         dataFim: formDataFim || undefined,
         situacao: formSituacao,
+        categoria: formCategoria,
         observacao: formObs || undefined,
         ano: selectedYear
       });
@@ -829,6 +582,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
         dataInicio: formDataInicio || undefined,
         dataFim: formDataFim || undefined,
         situacao: formSituacao,
+        categoria: formCategoria,
         observacao: formObs || undefined
       });
     }
@@ -839,18 +593,16 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
   // Export to Excel
   const handleExportExcel = () => {
     const data = filteredFerias.map((f, idx) => {
-      const cruzamento = getCruzamentoMilitar(f, efetivo);
-      const nomeCompleto = cruzamento.militar?.nomeCompleto || f.nome;
+      const cat = getMilitarCategoria(f);
       return {
         'Nº': idx + 1,
         'Ano': f.ano,
         'Mês Previsto': f.mesPrevisto,
-        'Posto/Grad': cruzamento.militar?.postoGraduacao || f.posto,
-        'Nome Completo': nomeCompleto,
+        'Posto/Grad': f.posto,
+        'Nome Completo': f.nome,
         'Matrícula': f.matricula,
-        'Setor na Escala': cruzamento.setorEscala,
-        'Enquadramento': cruzamento.isNaoOperacional ? `Descontado (${cruzamento.categoriaNaoOperacional})` : 'Operacional de Rua',
-        'Vínculo Efetivo': cruzamento.encontradoNoEfetivo ? 'Confirmado via Matrícula' : 'Não localizado no cadastro',
+        'Classificação': cat,
+        'Impacto Operacional': cat === 'Operacional' ? 'Sim (Rua / VTR)' : `Não (Descontado - ${cat})`,
         'Período (Dias)': f.periodoDias || 30,
         'Exercício (Ano Ref)': f.anoReferencia || '',
         'Data Início': f.dataInicio || '',
@@ -879,22 +631,21 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
     doc.text(
-      `Filtro: ${selectedMonth === 'TODOS' ? 'Todos os Meses' : selectedMonth} | Total de Militares: ${filteredFerias.length} | Impacto Operacional: ${currentSelectedStats.impactoOperacional} militares (Descontados: ${currentSelectedStats.naoOperacionais})`, 
+      `Filtro: ${selectedMonth === 'TODOS' ? 'Todos os Meses' : selectedMonth} | Total de Militares: ${filteredFerias.length} | Impacto Operacional: ${currentSelectedStats.impactoOperacional} policiais (Descontados: ${currentSelectedStats.descontados})`, 
       14, 
       28
     );
 
     const tableRows = filteredFerias.map((f, i) => {
-      const cruzamento = getCruzamentoMilitar(f, efetivo);
-      const nomeCompleto = cruzamento.militar?.nomeCompleto || f.nome;
+      const cat = getMilitarCategoria(f);
       return [
         String(i + 1),
         f.mesPrevisto,
-        cruzamento.militar?.postoGraduacao || f.posto,
-        nomeCompleto,
+        f.posto,
+        f.nome,
         f.matricula,
-        cruzamento.setorEscala,
-        cruzamento.isNaoOperacional ? `Desc. (${cruzamento.categoriaNaoOperacional})` : 'Operacional',
+        cat,
+        cat === 'Operacional' ? 'Operacional (Rua)' : `Desc. (${cat})`,
         `${f.periodoDias || 30} dias`,
         f.situacao
       ];
@@ -902,7 +653,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
 
     autoTable(doc, {
       startY: 32,
-      head: [['Nº', 'Mês', 'Posto', 'Nome Completo', 'Matrícula', 'Setor Escala', 'Enquadramento', 'Período', 'Situação']],
+      head: [['Nº', 'Mês', 'Posto', 'Nome Completo', 'Matrícula', 'Classificação', 'Impacto', 'Período', 'Situação']],
       body: tableRows,
       theme: 'grid',
       styles: { fontSize: 8, cellPadding: 2 },
@@ -928,7 +679,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
               Previsão de Férias por Mês
             </h1>
             <p className="text-xs sm:text-sm text-emerald-200/80 max-w-2xl mt-1 leading-relaxed">
-              Mapeamento do efetivo previsto para fruição de férias ao longo do ano. Importe facilmente a relação em PDF ou planilha Excel para sincronização automática.
+              Mapeamento do efetivo previsto para fruição de férias ao longo do ano. Classifique os militares em Administrativo, P2, Oficiais ou À Disposição para excluí-los automaticamente do desfalque das viaturas e obter o Impacto Operacional exato.
             </p>
           </div>
 
@@ -941,118 +692,83 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
               <span>Importar PDF ou Excel de Férias</span>
             </button>
 
-            {onOpenImportEscalaPdf && (
-              <button
-                onClick={onOpenImportEscalaPdf}
-                className="px-4 py-2.5 rounded-xl bg-emerald-900/90 hover:bg-emerald-800 text-emerald-100 font-bold text-xs flex items-center gap-2 border border-emerald-700/60 shadow-sm transition-all cursor-pointer"
-                title="Importar ou atualizar PDF com o efetivo do batalhão para cruzar as escalas Administrativo e Comandante da Base Comunitária"
-              >
-                <FileText size={16} className="text-emerald-300" />
-                <span>PDF Efetivo do Batalhão</span>
-              </button>
-            )}
-
             <button
               onClick={handleOpenAdd}
               className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2 border border-white/20 transition-all cursor-pointer"
             >
               <Plus size={16} />
-              <span>Novo Agendamento</span>
+              <span>Agendar Férias</span>
             </button>
 
             <button
               onClick={handleExportExcel}
-              className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs flex items-center gap-1 border border-white/20 transition-all cursor-pointer"
-              title="Exportar Planilha Excel"
+              className="px-3 py-2.5 rounded-xl bg-emerald-900/80 hover:bg-emerald-900 text-emerald-200 hover:text-white font-bold text-xs flex items-center gap-1.5 border border-emerald-800 transition-all cursor-pointer"
+              title="Exportar dados para Excel (.xlsx)"
             >
               <FileSpreadsheet size={16} />
+              <span>Excel</span>
             </button>
 
             <button
               onClick={handleExportPdf}
-              className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs flex items-center gap-1 border border-white/20 transition-all cursor-pointer"
-              title="Exportar Relatório PDF"
+              className="px-3 py-2.5 rounded-xl bg-emerald-900/80 hover:bg-emerald-900 text-emerald-200 hover:text-white font-bold text-xs flex items-center gap-1.5 border border-emerald-800 transition-all cursor-pointer"
+              title="Exportar relatório para PDF (.pdf)"
             >
               <FileText size={16} />
+              <span>PDF</span>
             </button>
           </div>
-        </div>
-
-        {/* Status do cruzamento com o Efetivo do Batalhão (PDF) */}
-        <div className="mt-5 pt-4 border-t border-emerald-800/60 flex flex-wrap items-center justify-between gap-3 text-xs text-emerald-200/90">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-900/80 border border-emerald-700 text-emerald-300 font-mono text-[11px] font-bold">
-              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              Efetivo do Batalhão: {efetivo.length} militares
-            </span>
-            <span className="text-emerald-500">•</span>
-            <span className="text-amber-200 font-mono text-[11px]">
-              Escala Administrativo: <strong>{efetivoBatalhaoStats.adminCount}</strong>
-            </span>
-            <span className="text-emerald-500">•</span>
-            <span className="text-cyan-200 font-mono text-[11px]">
-              Comandante da Base Comunitária: <strong>{efetivoBatalhaoStats.cmtBaseCount}</strong>
-            </span>
-          </div>
-          {onOpenImportEscalaPdf && (
-            <button
-              onClick={onOpenImportEscalaPdf}
-              className="text-[11px] text-emerald-300 hover:text-white underline cursor-pointer font-sans"
-            >
-              Atualizar PDF do efetivo
-            </button>
-          )}
         </div>
 
         {/* Quick KPI stats bar */}
         <div className="mt-6 pt-6 border-t border-emerald-800/60 grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div>
-            <span className="text-[10px] uppercase font-mono tracking-wider text-emerald-300/70">Total Previsto ({selectedYear})</span>
-            <div className="text-2xl font-black font-mono text-white mt-0.5">{totalAno}</div>
-            <div className="text-[10px] text-emerald-300/60 font-mono mt-0.5">Ano {selectedYear}</div>
+            <span className="text-[10px] text-emerald-300/80 uppercase font-mono tracking-wider block">Total Geral Agendado</span>
+            <span className="text-xl sm:text-2xl font-bold font-mono text-white mt-0.5 block">{totalAno}</span>
+            <span className="text-[10px] text-emerald-300/60 font-mono">No ano {selectedYear}</span>
           </div>
           <div>
-            <span className="text-[10px] uppercase font-mono tracking-wider text-emerald-300/70">Em Gozo Atualmente ({currentMonthName})</span>
-            <div className="text-2xl font-black font-mono text-emerald-300 mt-0.5 flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              {emGozoCount}
-            </div>
-            <div className="text-[10px] text-emerald-300/60 font-mono mt-0.5">Mês em andamento</div>
+            <span className="text-[10px] text-emerald-300/80 uppercase font-mono tracking-wider block">Em Gozo Atualmente</span>
+            <span className="text-xl sm:text-2xl font-bold font-mono text-emerald-400 mt-0.5 block">{emGozoCount}</span>
+            <span className="text-[10px] text-emerald-300/60 font-mono">{currentMonthName} / {currentYear}</span>
           </div>
           <div>
-            <span className="text-[10px] uppercase font-mono tracking-wider text-emerald-300/70">Previstas para Fruir</span>
-            <div className="text-2xl font-black font-mono text-amber-300 mt-0.5">{previstasCount}</div>
-            <div className="text-[10px] text-amber-300/80 font-mono mt-0.5 truncate">
-              {selectedYear === currentYear && currentMonthIndex < 11 
-                ? `${MESES_DO_ANO[currentMonthIndex + 1].slice(0, 3)} a Dezembro` 
-                : selectedYear > currentYear ? 'Ano completo a fruir' : '0 restantes'}
-            </div>
+            <span className="text-[10px] text-emerald-300/80 uppercase font-mono tracking-wider block">Previstas para Fruir</span>
+            <span className="text-xl sm:text-2xl font-bold font-mono text-amber-300 mt-0.5 block">{previstasCount}</span>
+            <span className="text-[10px] text-emerald-300/60 font-mono">Meses restantes de {selectedYear}</span>
           </div>
           <div>
-            <span className="text-[10px] uppercase font-mono tracking-wider text-emerald-300/70">Férias Concluídas</span>
-            <div className="text-2xl font-black font-mono text-blue-300 mt-0.5">{concluidasCount}</div>
-            <div className="text-[10px] text-blue-200/60 font-mono mt-0.5">Meses anteriores</div>
+            <span className="text-[10px] text-emerald-300/80 uppercase font-mono tracking-wider block">Férias Concluídas</span>
+            <span className="text-xl sm:text-2xl font-bold font-mono text-blue-300 mt-0.5 block">{concluidasCount}</span>
+            <span className="text-[10px] text-emerald-300/60 font-mono">Períodos já finalizados</span>
           </div>
         </div>
       </div>
 
-      {/* PAINEL DO GRÁFICO ENXUTO: SOMENTE NÚMEROS DE IMPACTO OPERACIONAL REAL */}
+      {/* Seção Gráfica: Impacto Operacional nas Ruas */}
       <div className="bg-white rounded-2xl border border-line shadow-xs overflow-hidden">
-        {/* Header Compacto */}
-        <div className="px-4 py-3 sm:px-5 sm:py-3.5 border-b border-line bg-slate-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-          <div className="flex items-center gap-2">
-            <span className="p-1.5 rounded-lg bg-emerald-800 text-white shadow-xs">
-              <BarChart3 size={16} />
-            </span>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-sm font-black text-ink tracking-tight">
-                Impacto Operacional Real
+        <div className="p-4 sm:p-5 border-b border-line flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/50">
+          <div>
+            <div className="flex items-center gap-2">
+              <ShieldAlert size={18} className="text-amber-600" />
+              <h3 className="text-sm font-bold text-ink uppercase tracking-wider">
+                Impacto Operacional nas Viaturas e Escalas de Rua ({selectedYear})
               </h3>
-              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
-                Viaturas / Rua
+            </div>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <span className="text-xs text-ink/60 font-medium">
+                {chartViewMode === 'restantes' 
+                  ? selectedYear === currentYear
+                    ? `Meses restantes (${currentMonthName} a Dezembro)` 
+                    : `Ano ${selectedYear}`
+                  : `Distribuição completa do ano ${selectedYear}`}
+              </span>
+              <span className="text-ink/40">•</span>
+              <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-950 border border-emerald-300">
+                Apenas Policiais de Rua
               </span>
               <span className="text-xs font-mono font-bold text-emerald-950 bg-white px-2.5 py-0.5 rounded-md border border-line shadow-xs">
-                Total: {kpisMesesRestantes.totalImpacto} policiais
+                Total do Período: {kpisMesesRestantes.totalImpacto} policiais operacionais
               </span>
             </div>
           </div>
@@ -1084,7 +800,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
           </div>
         </div>
 
-        {/* Gráfico de Barras Compacto com Números Reais no Topo das Barras */}
+        {/* Gráfico de Barras com Números de Impacto Operacional no Topo */}
         <div className="p-4 sm:p-5">
           <div className="h-44 w-full">
             <ResponsiveContainer width="100%" height="100%">
@@ -1116,11 +832,31 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
                     if (active && payload && payload.length) {
                       const data = payload[0].payload;
                       return (
-                        <div className="bg-slate-900 text-white px-3 py-2 rounded-xl shadow-lg border border-slate-800 text-xs space-y-1 font-mono z-50">
-                          <div className="font-bold text-emerald-400">{label} / {selectedYear}</div>
-                          <div className="text-white text-xs">
-                            Impacto Operacional Real: <strong className="text-emerald-300 text-sm">{data.impactoOperacional}</strong> PMs
+                        <div className="bg-slate-900 text-white px-3 py-2.5 rounded-xl shadow-lg border border-slate-800 text-xs space-y-1.5 font-mono z-50 min-w-[200px]">
+                          <div className="font-bold text-emerald-400 border-b border-slate-700 pb-1 flex items-center justify-between">
+                            <span>{label} / {selectedYear}</span>
+                            {data.isMesAtual && <span className="text-[9px] bg-emerald-800 text-white px-1.5 py-0.2 rounded">Mês Atual</span>}
                           </div>
+                          <div className="text-white text-xs flex justify-between">
+                            <span>Impacto Operacional (Rua):</span>
+                            <strong className="text-emerald-300 text-sm font-bold">{data.impactoOperacional}</strong>
+                          </div>
+                          <div className="text-slate-300 text-[11px] flex justify-between">
+                            <span>Total Geral Agendado:</span>
+                            <span className="text-white font-bold">{data.total}</span>
+                          </div>
+                          <div className="text-amber-300 text-[11px] flex justify-between border-t border-slate-800 pt-1">
+                            <span>Militares Descontados:</span>
+                            <span className="font-bold">{data.descontados}</span>
+                          </div>
+                          {data.descontados > 0 && (
+                            <div className="text-[10px] text-slate-400 pl-1 space-y-0.5">
+                              {data.porCategoria.Administrativo > 0 && <div>• Admin: {data.porCategoria.Administrativo}</div>}
+                              {data.porCategoria.P2 > 0 && <div>• P2: {data.porCategoria.P2}</div>}
+                              {data.porCategoria.Oficiais > 0 && <div>• Oficiais: {data.porCategoria.Oficiais}</div>}
+                              {data.porCategoria['À Disposição'] > 0 && <div>• À Disposição: {data.porCategoria['À Disposição']}</div>}
+                            </div>
+                          )}
                         </div>
                       );
                     }
@@ -1204,8 +940,9 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
           </button>
 
           {MESES_DO_ANO.map(m => {
-            const count = countByMonth[m] || 0;
-            const opImpact = monthlyOperationalStats[m]?.impactoOperacional ?? count;
+            const stats = monthlyOperationalStats[m];
+            const count = stats?.total || 0;
+            const opImpact = stats?.impactoOperacional || 0;
             const isSelected = selectedMonth === m;
             return (
               <button
@@ -1230,7 +967,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
                     className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded mt-0.5 ${
                       isSelected ? 'bg-amber-400 text-slate-950' : 'bg-amber-100 text-amber-900'
                     }`}
-                    title={`Impacto Operacional: ${opImpact} militares nas ruas`}
+                    title={`Total: ${count} | Impacto Operacional: ${opImpact} policiais nas ruas`}
                   >
                     {opImpact} op.
                   </span>
@@ -1265,7 +1002,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
                 </h4>
                 
                 <p className="text-xs text-white/70 leading-relaxed">
-                  Quantidade real de policiais militares que desfalcam a escala das viaturas e guarnições de rua no período. Obtido subtraindo do total do mês os militares de funções de chefia/apoio ou afastados (Administrativo, Supervisor, Comandante, Subcomandante, LTS e À Disposição).
+                  Cálculo do desfalque real das viaturas de rua. Os militares classificados como <strong>Administrativo, P2, Oficiais ou À Disposição</strong> são descontados do total do mês, resultando no efetivo operacional real.
                 </p>
               </div>
 
@@ -1274,7 +1011,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
                 {/* 1. Total Previsto no Mês */}
                 <div className="bg-white/10 backdrop-blur-xs px-4 py-3 rounded-xl border border-white/15 min-w-[125px] flex flex-col justify-between">
                   <span className="text-[10px] uppercase font-mono font-bold text-emerald-300/80 block">
-                    {currentSelectedStats.isAll ? 'Total Previsto Ano' : `Total Previsto (${selectedMonth.slice(0, 3)})`}
+                    {currentSelectedStats.isAll ? 'Total Agendado Ano' : `Total Previsto (${selectedMonth.slice(0, 3)})`}
                   </span>
                   <div className="text-2xl font-black font-mono text-white mt-1">
                     {currentSelectedStats.total}
@@ -1289,16 +1026,16 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
                   −
                 </div>
 
-                {/* 2. Militares Não-Operacionais Descontados */}
+                {/* 2. Militares Descontados (Admin, P2, Oficiais, À Disposição) */}
                 <div className="bg-white/10 backdrop-blur-xs px-4 py-3 rounded-xl border border-white/15 min-w-[145px] flex flex-col justify-between">
                   <span className="text-[10px] uppercase font-mono font-bold text-red-300/80 block">
                     Militares Descontados
                   </span>
                   <div className="text-2xl font-black font-mono text-red-300 mt-1">
-                    {currentSelectedStats.naoOperacionais}
+                    {currentSelectedStats.descontados}
                   </div>
                   <span className="text-[10px] text-white/50 block mt-0.5 font-mono">
-                    Admin / Cmt / LTS / AD
+                    Admin / P2 / Oficiais / AD
                   </span>
                 </div>
 
@@ -1317,7 +1054,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
                     <span className="text-xs font-normal text-amber-200/80">policiais</span>
                   </div>
                   <span className="text-[10px] text-amber-300/80 block mt-0.5 font-mono font-bold">
-                    {currentSelectedStats.total} − {currentSelectedStats.naoOperacionais} = {currentSelectedStats.impactoOperacional} nas ruas
+                    {currentSelectedStats.total} − {currentSelectedStats.descontados} = {currentSelectedStats.impactoOperacional} nas ruas
                   </span>
                 </div>
               </div>
@@ -1327,11 +1064,11 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
             {/* Categorias Descontadas Detalhadas */}
             <div className="mt-4 pt-3.5 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
               <span className="text-white/70 text-[11px] font-medium">
-                Desdobramento dos militares não-operacionais descontados ({currentSelectedStats.naoOperacionais} no total):
+                Desdobramento dos militares fora do cálculo operacional ({currentSelectedStats.descontados} no total):
               </span>
 
               <div className="flex items-center gap-1.5 flex-wrap">
-                {(Object.entries(currentSelectedStats.porCategoria) as [CategoriaNaoOperacional, number][]).map(([cat, qty]) => (
+                {(Object.entries(currentSelectedStats.porCategoria) as [CategoriaDesconto, number][]).map(([cat, qty]) => (
                   <span 
                     key={cat}
                     className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold flex items-center gap-1.5 border transition-all ${
@@ -1394,11 +1131,11 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
               }`}
             >
               <Layers size={14} className={tableRosterView === 'descontados' ? 'text-white' : 'text-amber-700'} />
-              <span>Retirados da Escala ({countDescontadosFiltro})</span>
+              <span>Fora do Operacional ({countDescontadosFiltro})</span>
               <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${
                 tableRosterView === 'descontados' ? 'bg-amber-950 text-amber-200' : 'bg-slate-200 text-slate-700'
               }`}>
-                Admin / Cmt Base
+                Admin / P2 / Oficiais / AD
               </span>
             </button>
           </div>
@@ -1407,9 +1144,9 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
             <span>Filtro ativo:</span>
             <span className="font-semibold text-emerald-900">
               {tableRosterView === 'operacional' 
-                ? 'Excluindo Administrativo e Cmt da Base Comunitária' 
+                ? 'Excluindo Administrativo, P2, Oficiais e À Disposição' 
                 : tableRosterView === 'descontados'
-                ? 'Listando apenas Administrativo e Cmt da Base Comunitária'
+                ? 'Listando apenas Administrativo, P2, Oficiais e À Disposição'
                 : 'Exibindo efetivo geral agendado'}
             </span>
           </div>
@@ -1421,14 +1158,28 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
             <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink/40" />
             <input
               type="text"
-              placeholder="Pesquisar por nome, nome de guerra, posto, matrícula ou setor da escala..."
+              placeholder="Pesquisar por nome, matrícula, posto, classificação ou observação..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-9 pr-4 py-2 bg-slate-50 rounded-xl border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-emerald-800/20 focus:border-emerald-800 transition-all"
             />
           </div>
 
-          <div className="flex items-center gap-2 w-full md:w-auto">
+          <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
+            {/* Categoria Filter */}
+            <select
+              value={selectedCategoriaFilter}
+              onChange={(e) => setSelectedCategoriaFilter(e.target.value)}
+              className="bg-slate-50 border border-line text-xs rounded-xl px-3 py-2 text-ink font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-800"
+            >
+              <option value="TODOS">Todas Categorias</option>
+              <option value="Operacional">Operacional (Rua / VTR)</option>
+              <option value="Administrativo">Administrativo [Fora]</option>
+              <option value="P2">P2 (Inteligência) [Fora]</option>
+              <option value="Oficiais">Oficiais [Fora]</option>
+              <option value="À Disposição">À Disposição [Fora]</option>
+            </select>
+
             {/* Status Filter */}
             <select
               value={selectedStatus}
@@ -1445,7 +1196,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
         </div>
       </div>
 
-      {/* Roster of Personnel Scheduled for Vacation */}
+      {/* Main Table: Relação Nominal de Férias */}
       <div className="bg-white rounded-2xl border border-line shadow-xs overflow-hidden">
         <div className="p-4 sm:p-5 border-b border-line flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/70">
           <div>
@@ -1460,9 +1211,9 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
                 <ShieldAlert size={12} className="text-amber-700" />
                 Impacto Operacional: {currentSelectedStats.impactoOperacional} policiais
               </span>
-              {currentSelectedStats.naoOperacionais > 0 && (
+              {currentSelectedStats.descontados > 0 && (
                 <span className="text-slate-600 text-[11px] font-mono">
-                  ({currentSelectedStats.naoOperacionais} descontados da escala de rua)
+                  ({currentSelectedStats.descontados} descontados da escala de rua)
                 </span>
               )}
             </div>
@@ -1478,7 +1229,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
             <Calendar size={40} className="mx-auto text-ink/20" />
             <p className="text-sm font-bold text-ink/70">Nenhum militar encontrado para os filtros selecionados</p>
             <p className="text-xs text-ink/40 max-w-sm mx-auto">
-              Você pode carregar uma relação anual completa clicando em "Importar PDF ou Excel" acima ou agendar manualmente.
+              Você pode carregar uma relação anual completa clicando em "Importar PDF ou Excel de Férias" acima ou agendar manualmente.
             </p>
           </div>
         ) : (
@@ -1487,7 +1238,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
               <thead>
                 <tr className="border-b border-line bg-slate-100/80 text-[11px] font-bold text-ink/70 uppercase tracking-wider">
                   <th className="py-3 px-4">Posto / Nome Completo</th>
-                  <th className="py-3 px-4">Setor na Escala / Cruzamento</th>
+                  <th className="py-3 px-4">Classificação / Impacto</th>
                   <th className="py-3 px-4">Matrícula</th>
                   <th className="py-3 px-4">Mês Previsto</th>
                   <th className="py-3 px-4">Período</th>
@@ -1497,57 +1248,67 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
               </thead>
               <tbody className="divide-y divide-line">
                 {filteredFerias.map((item) => {
-                  const cruzamento = getCruzamentoMilitar(item, efetivo);
-                  const nomeCompleto = (item.nome && item.nome.trim().split(/\s+/).length >= 2)
-                    ? item.nome
-                    : (cruzamento.militar?.nomeCompleto || item.nome);
-                  const postoExibicao = (item.posto && item.posto !== 'Sd')
-                    ? item.posto
-                    : (cruzamento.militar?.postoGraduacao || item.posto || 'Sd');
+                  const cat = getMilitarCategoria(item);
+                  const cfg = CATEGORIAS_CONFIG[cat];
+                  const isDescontado = isDescontadoOperacional(cat);
+
                   return (
                   <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2.5">
                         <span className="w-14 shrink-0 font-mono font-bold text-emerald-950 bg-emerald-50 px-2 py-0.5 rounded text-center border border-emerald-200">
-                          {postoExibicao}
+                          {item.posto || 'Sd'}
                         </span>
                         <div>
-                          <div className="font-bold text-ink">{nomeCompleto}</div>
+                          <div className="font-bold text-ink">{item.nome}</div>
+                          {item.observacao && (
+                            <div className="text-[10px] text-ink/50 line-clamp-1">{item.observacao}</div>
+                          )}
                         </div>
                       </div>
                     </td>
 
+                    {/* Classificação Manual e Imediata do Militar */}
                     <td className="py-3 px-4">
                       <div className="space-y-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {cruzamento.isNaoOperacional ? (
-                            <span 
-                              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-100 text-amber-900 border border-amber-300"
-                              title={`Descontado do impacto operacional de rua: ${cruzamento.categoriaNaoOperacional}${cruzamento.detalheSetor ? ` (${cruzamento.detalheSetor})` : ''}`}
-                            >
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
-                              Descontado ({cruzamento.categoriaNaoOperacional})
-                            </span>
-                          ) : (
-                            <span 
-                              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-100 text-emerald-900 border border-emerald-300"
-                              title="Militar do serviço operacional de viaturas / rádio-patrulha"
-                            >
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
-                              Operacional de Rua
-                            </span>
-                          )}
+                        <div className="flex items-center gap-1.5">
+                          <select
+                            value={cat}
+                            onChange={(e) => {
+                              const novaCat = e.target.value as CategoriaEscalaFerias;
+                              onUpdateFerias(item.id, { categoria: novaCat });
+                            }}
+                            className={`text-xs font-bold font-mono px-2.5 py-1 rounded-lg border cursor-pointer focus:outline-none focus:ring-2 transition-all ${
+                              cat === 'Operacional'
+                                ? 'bg-emerald-50 text-emerald-950 border-emerald-300 focus:ring-emerald-500/30'
+                                : cat === 'Administrativo'
+                                ? 'bg-amber-50 text-amber-950 border-amber-300 focus:ring-amber-500/30'
+                                : cat === 'P2'
+                                ? 'bg-purple-50 text-purple-950 border-purple-300 focus:ring-purple-500/30'
+                                : cat === 'Oficiais'
+                                ? 'bg-blue-50 text-blue-950 border-blue-300 focus:ring-blue-500/30'
+                                : 'bg-slate-100 text-slate-900 border-slate-300 focus:ring-slate-500/30'
+                            }`}
+                            title="Selecione a classificação deste militar para o cálculo de impacto operacional"
+                          >
+                            <option value="Operacional">🛡️ Operacional (Rua / VTR)</option>
+                            <option value="Administrativo">🏢 Administrativo [Fora]</option>
+                            <option value="P2">🕵️ P2 (Inteligência) [Fora]</option>
+                            <option value="Oficiais">⭐ Oficiais [Fora]</option>
+                            <option value="À Disposição">📋 À Disposição [Fora]</option>
+                          </select>
                         </div>
 
-                        <div className="text-[11px] font-mono text-ink/80 flex items-center gap-1">
-                          <Layers size={11} className="text-emerald-800 shrink-0" />
-                          <span className="font-semibold text-ink">{cruzamento.setorEscala}</span>
-                          {cruzamento.encontradoNoEfetivo && (
-                            <span 
-                              className="inline-flex items-center text-[9px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1 rounded font-mono"
-                              title="Cruzado com sucesso pela matrícula na Gestão de Efetivo"
-                            >
-                              <CheckCircle2 size={9} className="mr-0.5 text-emerald-600" /> Matrícula OK
+                        <div className="text-[10px] font-mono">
+                          {!isDescontado ? (
+                            <span className="text-emerald-700 font-bold flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                              Entra no Impacto Operacional
+                            </span>
+                          ) : (
+                            <span className="text-amber-800 font-bold flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block"></span>
+                              Descontado (Fora do cálculo)
                             </span>
                           )}
                         </div>
@@ -1664,17 +1425,17 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
             </div>
 
             <form onSubmit={handleSaveForm} className="p-6 space-y-4 overflow-y-auto max-h-[80vh]">
-              {/* Select from existing military database */}
+              {/* Select from existing military database (opcional) */}
               <div>
                 <label className="text-xs font-bold text-ink block mb-1">
-                  Vincular a Militar do Efetivo:
+                  Vincular a Militar do Cadastro (Opcional):
                 </label>
                 <select
                   value={formMatricula}
                   onChange={(e) => handleSelectMilitarFromDb(e.target.value)}
                   className="w-full bg-slate-50 border border-line text-xs rounded-xl px-3 py-2 font-medium"
                 >
-                  <option value="">-- Selecionar Militar Cadastrado --</option>
+                  <option value="">-- Selecionar Militar (Preenche automaticamente) --</option>
                   {efetivo.map(m => (
                     <option key={m.id} value={m.matricula}>
                       {m.postoGraduacao} {m.nomeCompleto} ({m.matricula})
@@ -1731,6 +1492,27 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
                 />
               </div>
 
+              {/* Classificação / Destinação do Militar */}
+              <div className="p-3 bg-slate-50 rounded-xl border border-line space-y-1.5">
+                <label className="text-xs font-bold text-ink block">
+                  Classificação / Destinação (Impacto Operacional):
+                </label>
+                <select
+                  value={formCategoria}
+                  onChange={(e) => setFormCategoria(e.target.value as CategoriaEscalaFerias)}
+                  className="w-full bg-white border border-line text-xs rounded-xl px-3 py-2 font-bold focus:ring-1 focus:ring-emerald-800"
+                >
+                  <option value="Operacional">🛡️ Operacional (Rua / Viaturas) - Entra no Impacto</option>
+                  <option value="Administrativo">🏢 Administrativo - Fica de Fora do Cálculo</option>
+                  <option value="P2">🕵️ P2 (Inteligência) - Fica de Fora do Cálculo</option>
+                  <option value="Oficiais">⭐ Oficiais - Fica de Fora do Cálculo</option>
+                  <option value="À Disposição">📋 À Disposição - Fica de Fora do Cálculo</option>
+                </select>
+                <p className="text-[11px] text-ink/60">
+                  Militares definidos como <strong>Administrativo, P2, Oficiais ou À Disposição</strong> são excluídos do total do mês para apurar o impacto real nas viaturas de rua.
+                </p>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-ink block mb-1">Mês Previsto:</label>
@@ -1772,6 +1554,16 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
                     <option value="Interrompida">Interrompida</option>
                   </select>
                 </div>
+
+                <div>
+                  <label className="text-xs font-bold text-ink block mb-1">Ano:</label>
+                  <input
+                    type="number"
+                    value={selectedYear}
+                    disabled
+                    className="w-full bg-slate-100 border border-line text-xs rounded-xl px-3 py-2 font-mono text-ink/70"
+                  />
+                </div>
               </div>
 
               <div>
@@ -1781,7 +1573,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
                   value={formObs}
                   onChange={(e) => setFormObs(e.target.value)}
                   className="w-full bg-slate-50 border border-line text-xs rounded-xl px-3 py-2"
-                  placeholder="Ex: 1º período, portaria nº..."
+                  placeholder="Ex: 1º período regular"
                 />
               </div>
 
@@ -1789,21 +1581,22 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-ink/60 hover:bg-slate-100 cursor-pointer"
+                  className="px-4 py-2 rounded-xl border border-line text-xs font-bold text-ink/70 hover:bg-slate-100 cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-950 text-white hover:bg-emerald-900 cursor-pointer"
+                  className="px-5 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs cursor-pointer"
                 >
-                  Salvar
+                  {editingItem ? 'Salvar Alterações' : 'Cadastrar Previsão'}
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
+
     </div>
   );
 };

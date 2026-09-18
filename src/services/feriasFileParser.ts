@@ -1,7 +1,39 @@
 import * as XLSX from 'xlsx';
 import { pdfjsLib } from './pdfWorkerSetup';
-import { PrevisaoFerias, MesAno, PostoGraduacao, EfetivoMilitar } from '../types';
+import { PrevisaoFerias, MesAno, PostoGraduacao, EfetivoMilitar, CategoriaEscalaFerias } from '../types';
 import { normalizePosto } from './excelEfetivoParser';
+
+export function detectInitialCategoria(posto: string, obs?: string, nome?: string): CategoriaEscalaFerias {
+  const p = (posto || '').toUpperCase();
+  const o = (obs || '').toUpperCase();
+  const n = (nome || '').toUpperCase();
+
+  if (o.includes('P2') || o.includes('P/2') || o.includes('INTELIGENCIA') || o.includes('INTELIGÊNCIA')) {
+    return 'P2';
+  }
+  if (o.includes('DISPOSIC') || o.includes('ADIDO') || o === 'AD' || n.includes('ADIDO')) {
+    return 'À Disposição';
+  }
+  if (o.includes('ADMIN') || o.includes('EXPEDIENTE') || o.includes('SECRETARIA') || o.includes('ARMEIRO') || o.includes('RESERVA DE ARMAMENTO')) {
+    return 'Administrativo';
+  }
+  if (
+    p.includes('CEL') || 
+    p.includes('MAJ') || 
+    p.includes('CAP') || 
+    p.includes('1º TEN') || 
+    p.includes('2º TEN') || 
+    p.includes('TEN') ||
+    p === 'OFICIAL' ||
+    o.includes('OFICIAL') ||
+    o.includes('CMT') ||
+    o.includes('COMANDANTE')
+  ) {
+    return 'Oficiais';
+  }
+
+  return 'Operacional';
+}
 
 export const MESES_DO_ANO: MesAno[] = [
   'Janeiro',
@@ -687,6 +719,7 @@ export async function parseExcelFerias(
         }
 
         monthsFound.add(mes);
+        const obsFinal = obsParts.length > 0 ? obsParts.join(' • ') : undefined;
 
         records.push({
           id: `FERIAS-${matricula}-${mes}-${anoGozo}-${records.length + 1}`,
@@ -699,7 +732,8 @@ export async function parseExcelFerias(
           mesPrevisto: mes,
           periodoDias: dias,
           situacao,
-          observacao: obsParts.length > 0 ? obsParts.join(' • ') : undefined
+          observacao: obsFinal,
+          categoria: detectInitialCategoria(posto, obsFinal, nomeCompleto)
         });
       }
 
@@ -881,6 +915,8 @@ export async function parseExcelFerias(
             dias = numVal;
           }
 
+          const obsFinal = strVal !== 'X' && strVal !== String(dias) ? strVal : undefined;
+
           records.push({
             id: `FERIAS-${matricula}-${mMonth}-${records.length + 1}`,
             matricula,
@@ -891,7 +927,8 @@ export async function parseExcelFerias(
             mesPrevisto: mMonth,
             periodoDias: dias,
             situacao,
-            observacao: strVal !== 'X' && strVal !== String(dias) ? strVal : undefined
+            observacao: obsFinal,
+            categoria: detectInitialCategoria(posto, obsFinal, nomeCompleto)
           });
         });
 
@@ -926,6 +963,8 @@ export async function parseExcelFerias(
 
       monthsFound.add(mes);
 
+      const obsFinal = colPeriodo >= 0 ? cleanStr(row[colPeriodo]) : undefined;
+
       records.push({
         id: `FERIAS-${matricula}-${mes}-${records.length + 1}`,
         matricula,
@@ -936,7 +975,8 @@ export async function parseExcelFerias(
         mesPrevisto: mes,
         periodoDias: dias,
         situacao,
-        observacao: colPeriodo >= 0 ? cleanStr(row[colPeriodo]) : undefined
+        observacao: obsFinal,
+        categoria: detectInitialCategoria(posto, obsFinal, nomeCompleto)
       });
     }
   }
@@ -1115,17 +1155,21 @@ export async function parsePdfFerias(
             periodoDias = parseInt(daysMatch[1], 10);
           }
 
+          const finalPosto = matchedMilitar?.postoGraduacao || posto;
+          const finalNome = nome || (matchedMilitar?.nomeCompleto || 'Militar');
+
           records.push({
             id: `FERIAS-PDF-${matricula || records.length}-${rowMonth}-${records.length + 1}`,
             matricula: matricula || matchedMilitar?.matricula || `PM-${Math.floor(1000 + Math.random() * 9000)}`,
-            nome: nome || (matchedMilitar?.nomeCompleto || 'Militar'),
+            nome: finalNome,
             nomeGuerra: matchedMilitar?.nomeGuerra || (nome ? nome.split(' ')[0] : 'Militar'),
-            posto: matchedMilitar?.postoGraduacao || posto,
+            posto: finalPosto,
             ano: currentYear,
             mesPrevisto: rowMonth,
             periodoDias,
             situacao: 'Prevista',
-            observacao: 'Extraído do Boletim / PDF de Férias'
+            observacao: 'Extraído do Boletim / PDF de Férias',
+            categoria: detectInitialCategoria(finalPosto, 'Extraído do Boletim', finalNome)
           });
         }
       }
