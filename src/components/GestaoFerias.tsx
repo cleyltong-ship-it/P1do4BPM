@@ -47,6 +47,7 @@ import { ImportFeriasModal } from './ImportFeriasModal';
 // Categorias excluídas do cálculo do impacto no serviço operacional
 export type CategoriaNaoOperacional = 
   | 'Administrativo' 
+  | 'Comandante da Base Comunitária'
   | 'Supervisor' 
   | 'Comandante' 
   | 'Subcomandante' 
@@ -60,148 +61,12 @@ export interface NaoOperacionalInfo {
 }
 
 /**
- * Identifica se o militar pertence a uma das categorias não-operacionais:
- * "Administrativo", "Supervisor", "Comandante", "Subcomandante", "LTS" e "À Disposição".
- * Esses militares não compõem a escala básica de guarnições/viaturas de rua,
- * de modo que sua ausência não desfalca o serviço operacional de rua.
+ * Busca de forma segura o militar no cadastro do efetivo por matrícula ou nome
  */
-export function checkMilitarNaoOperacional(
+export function findMilitarInEfetivo(
   item: PrevisaoFerias, 
   efetivo: EfetivoMilitar[]
-): NaoOperacionalInfo {
-  const norm = (str?: string) => 
-    (str || '')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toUpperCase()
-      .trim();
-
-  const cleanDigits = (s?: string) => (s || '').replace(/[^0-9]/g, '');
-
-  const itemMatDigits = cleanDigits(item.matricula);
-  const m = efetivo.find(e => {
-    if (itemMatDigits && cleanDigits(e.matricula) === itemMatDigits) return true;
-    if (e.matricula && item.matricula && e.matricula.trim() === item.matricula.trim()) return true;
-    if (e.nomeCompleto && item.nome && norm(e.nomeCompleto) === norm(item.nome)) return true;
-    if (e.nomeGuerra && item.nomeGuerra && norm(e.nomeGuerra) === norm(item.nomeGuerra)) return true;
-    return false;
-  });
-
-  const situacao = norm(m?.situacao);
-  const funcao = norm(m?.funcao);
-  const escalaTipo = norm(m?.escalaTipo);
-  const posto = norm(item.posto || m?.postoGraduacao);
-  const obs = norm(item.observacao || m?.observacao);
-
-  // 1. LTS (Licença para Tratamento de Saúde / Atestados Médicos)
-  if (
-    situacao.includes('LTS') || 
-    funcao.includes('LTS') || 
-    obs.includes('LTS') || 
-    situacao.includes('MEDIC') || 
-    obs.includes('ATESTADO') ||
-    situacao.includes('SAUDE')
-  ) {
-    return { isNaoOperacional: true, categoria: 'LTS', detalhe: m?.situacao || 'LTS' };
-  }
-
-  // 2. À Disposição (Adido, AD, outro órgão)
-  if (
-    situacao.includes('DISPOSIC') || 
-    situacao === 'AD' || 
-    funcao.includes('DISPOSIC') || 
-    obs.includes('DISPOSIC') || 
-    obs === 'AD'
-  ) {
-    return { isNaoOperacional: true, categoria: 'À Disposição', detalhe: m?.situacao || 'À Disposição' };
-  }
-
-  // 3. Subcomandante (verificado antes de Comandante para evitar falso-positivo)
-  if (
-    funcao.includes('SUBCOMANDANTE') || 
-    funcao.includes('SUB COMANDANTE') || 
-    funcao.includes('SUB-COMANDANTE') || 
-    funcao.includes('SUBCMD') || 
-    obs.includes('SUBCOMANDANTE')
-  ) {
-    return { isNaoOperacional: true, categoria: 'Subcomandante', detalhe: m?.funcao || 'Subcomandante' };
-  }
-
-  // 4. Comandante (Comandante de Batalhão, Cia, Oficiais de Comando, etc.)
-  if (
-    funcao.includes('COMANDANTE') || 
-    funcao.includes('CMT') || 
-    funcao.includes('OFICIAL / COMANDO') || 
-    obs.includes('COMANDANTE') || 
-    ['CEL', 'TEN-CEL', 'MAJ'].includes(posto)
-  ) {
-    return { isNaoOperacional: true, categoria: 'Comandante', detalhe: m?.funcao || `${posto} / Comando` };
-  }
-
-  // 5. Supervisor (Supervisores de Oficial, Supervisão de área, Auxiliar do Oficial de Operações)
-  if (
-    funcao.includes('SUPERVISOR') || 
-    funcao.includes('SUPERVISAO') || 
-    funcao.includes('AUX. DO OF') ||
-    funcao.includes('AUXILIAR DO SUPERVISOR') ||
-    situacao.includes('SUPERVISOR') ||
-    situacao.includes('AUX. DO OF') ||
-    situacao.includes('AUXILIAR DO SUPERVISOR') ||
-    obs.includes('SUPERVISOR')
-  ) {
-    return { isNaoOperacional: true, categoria: 'Supervisor', detalhe: m?.funcao || m?.situacao || 'Supervisor' };
-  }
-
-  // 6. Administrativo (Expediente, P1, P2, P3, P4, P5, Reserva de Armamento, Armeiro, Secretaria)
-  if (
-    situacao.includes('ADMIN') || 
-    situacao.includes('ARMEIRO') ||
-    situacao.includes('RESERVA DE ARMAMENTO') ||
-    funcao.includes('ADMIN') || 
-    funcao.includes('ARMEIRO') ||
-    funcao.includes('EXPEDIENTE') || 
-    funcao.includes('P1') || 
-    funcao.includes('P2') || 
-    funcao.includes('P3') || 
-    funcao.includes('P4') || 
-    funcao.includes('P5') || 
-    funcao.includes('ESTADO-MAIOR') || 
-    funcao.includes('ESTADO MAIOR') || 
-    funcao.includes('SEDE') || 
-    funcao.includes('RESERVA DE ARMAMENTO') || 
-    funcao.includes('SECRETARIA') || 
-    funcao.includes('TESOURARIA') || 
-    escalaTipo === 'ADMIN' || 
-    escalaTipo === 'EXPEDIENTE' || 
-    obs.includes('ADMIN')
-  ) {
-    return { isNaoOperacional: true, categoria: 'Administrativo', detalhe: m?.funcao || m?.situacao || 'Administrativo' };
-  }
-
-  return { isNaoOperacional: false };
-}
-
-export interface CruzamentoMilitarInfo {
-  militar?: EfetivoMilitar;
-  encontradoNoEfetivo: boolean;
-  matricula: string;
-  setorEscala: string;
-  isNaoOperacional: boolean;
-  categoriaNaoOperacional?: CategoriaNaoOperacional;
-  detalheSetor: string;
-  escalaTipo?: string;
-  funcao?: string;
-}
-
-/**
- * Realiza o cruzamento de dados entre a relação de Férias e a Gestão de Efetivo
- * utilizando a MATRÍCULA como identificador primário, resgatando o setor na escala
- * (Solo, Força Tática, Base Comunitária, Administrativo, etc.) e classificando o impacto operacional real.
- */
-export function getCruzamentoMilitar(
-  item: PrevisaoFerias, 
-  efetivo: EfetivoMilitar[]
-): CruzamentoMilitarInfo {
+): EfetivoMilitar | undefined {
   const norm = (str?: string) => 
     (str || '')
       .normalize('NFD')
@@ -210,7 +75,6 @@ export function getCruzamentoMilitar(
       .trim();
 
   const cleanDigits = (s?: string) => (s || '').replace(/\D/g, '');
-
   const itemMatDigits = cleanDigits(item.matricula);
 
   // 1. Cruzamento prioritário pela Matrícula (chave única do militar)
@@ -220,7 +84,7 @@ export function getCruzamentoMilitar(
     return false;
   });
 
-  // 2. Fallback de correspondência segura por nome (sem colisões de sobrenomes soltos)
+  // 2. Fallback de correspondência segura por nome
   if (!m && item.nome) {
     const itemNome = norm(item.nome);
     // Correspondência exata de nome completo
@@ -250,12 +114,194 @@ export function getCruzamentoMilitar(
     }
   }
 
-  const check = checkMilitarNaoOperacional(item, efetivo);
+  // 3. Fallback por nome de guerra se fornecido no item
+  if (!m && item.nomeGuerra) {
+    const itemGuerra = norm(item.nomeGuerra);
+    m = efetivo.find(e => norm(e.nomeGuerra) === itemGuerra);
+  }
+
+  return m;
+}
+
+/**
+ * Identifica se o militar pertence a uma das categorias não-operacionais:
+ * "Administrativo", "Comandante da Base Comunitária", "Supervisor", "Comandante", "Subcomandante", "LTS" e "À Disposição".
+ * Esses militares não compõem a escala básica de guarnições/viaturas de rua,
+ * de modo que sua fruição de férias é retirada do cálculo de desfalque operacional de rua e do gráfico.
+ */
+export function checkMilitarNaoOperacional(
+  item: PrevisaoFerias, 
+  efetivo: EfetivoMilitar[],
+  matchedMilitar?: EfetivoMilitar
+): NaoOperacionalInfo {
+  const norm = (str?: string) => 
+    (str || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .trim();
+
+  const m = matchedMilitar || findMilitarInEfetivo(item, efetivo);
+
+  const situacao = norm(m?.situacao);
+  const localEscala = norm(m?.localEscala);
+  const funcao = norm(m?.funcao);
+  const escalaTipo = norm(m?.escalaTipo);
+  const posto = norm(item.posto || m?.postoGraduacao);
+  const obs = norm(item.observacao || m?.observacao);
+  const nomeGuerra = norm(item.nomeGuerra || m?.nomeGuerra);
+  const nomeCompleto = norm(item.nome || m?.nomeCompleto);
+
+  // 1. Comandante da Base Comunitária (Escala 05 / Sgt Dayse / Cmt Base Comunitária)
+  const isCmtBase = 
+    situacao === 'COMANDANTE DA BASE COMUNITARIA' ||
+    localEscala === 'COMANDANTE DA BASE COMUNITARIA' ||
+    funcao === 'COMANDANTE DA BASE COMUNITARIA' ||
+    (situacao.includes('BASE COMUNITARIA') && (situacao.includes('COMANDANTE') || situacao.includes('CMT'))) ||
+    (localEscala.includes('BASE COMUNITARIA') && (localEscala.includes('COMANDANTE') || localEscala.includes('CMT'))) ||
+    (funcao.includes('BASE COMUNITARIA') && (funcao.includes('COMANDANTE') || funcao.includes('CMT'))) ||
+    (obs.includes('BASE COMUNITARIA') && (obs.includes('COMANDANTE') || obs.includes('CMT'))) ||
+    ((nomeGuerra.includes('DAYSE') || nomeCompleto.includes('DAYSE')) && 
+      (localEscala.includes('BASE') || situacao.includes('BASE') || funcao.includes('BASE') || !localEscala || localEscala === 'Solo'));
+
+  if (isCmtBase) {
+    return { 
+      isNaoOperacional: true, 
+      categoria: 'Comandante da Base Comunitária', 
+      detalhe: m?.localEscala || m?.funcao || m?.situacao || 'Comandante da Base Comunitária' 
+    };
+  }
+
+  // 2. Administrativo (Escala 04, P1, P2, P3, P4, P5, Expediente, Secretaria, Armeiro, Reserva de Armamento)
+  const isAdmin = 
+    situacao === 'ADMINISTRATIVO' ||
+    localEscala === 'ADMINISTRATIVO' ||
+    funcao === 'ADMINISTRATIVO' ||
+    situacao.includes('ADMIN') || 
+    localEscala.includes('ADMIN') ||
+    funcao.includes('ADMIN') || 
+    situacao.includes('EXPEDIENTE') ||
+    localEscala.includes('EXPEDIENTE') ||
+    funcao.includes('EXPEDIENTE') ||
+    situacao.includes('ARMEIRO') ||
+    localEscala.includes('ARMEIRO') ||
+    funcao.includes('ARMEIRO') ||
+    situacao.includes('RESERVA DE ARMAMENTO') ||
+    localEscala.includes('RESERVA DE ARMAMENTO') ||
+    funcao.includes('RESERVA DE ARMAMENTO') ||
+    funcao.includes('P1') || 
+    funcao.includes('P2') || 
+    funcao.includes('P3') || 
+    funcao.includes('P4') || 
+    funcao.includes('P5') || 
+    funcao.includes('ESTADO-MAIOR') || 
+    funcao.includes('ESTADO MAIOR') || 
+    funcao.includes('SEDE') || 
+    funcao.includes('SECRETARIA') || 
+    funcao.includes('TESOURARIA') || 
+    funcao.includes('SARGENTEANTE') ||
+    escalaTipo === 'ADMIN' || 
+    escalaTipo === 'EXPEDIENTE' || 
+    obs.includes('ADMIN');
+
+  if (isAdmin) {
+    return { 
+      isNaoOperacional: true, 
+      categoria: 'Administrativo', 
+      detalhe: m?.localEscala || m?.funcao || m?.situacao || 'Administrativo' 
+    };
+  }
+
+  // 3. LTS (Licença para Tratamento de Saúde / Atestados Médicos)
+  if (
+    situacao.includes('LTS') || 
+    funcao.includes('LTS') || 
+    obs.includes('LTS') || 
+    situacao.includes('MEDIC') || 
+    obs.includes('ATESTADO') ||
+    situacao.includes('SAUDE')
+  ) {
+    return { isNaoOperacional: true, categoria: 'LTS', detalhe: m?.situacao || 'LTS' };
+  }
+
+  // 4. À Disposição (Adido, AD, outro órgão)
+  if (
+    situacao.includes('DISPOSIC') || 
+    situacao === 'AD' || 
+    funcao.includes('DISPOSIC') || 
+    obs.includes('DISPOSIC') || 
+    obs === 'AD'
+  ) {
+    return { isNaoOperacional: true, categoria: 'À Disposição', detalhe: m?.situacao || 'À Disposição' };
+  }
+
+  // 5. Subcomandante (verificado antes de Comandante para evitar falso-positivo)
+  if (
+    funcao.includes('SUBCOMANDANTE') || 
+    funcao.includes('SUB COMANDANTE') || 
+    funcao.includes('SUB-COMANDANTE') || 
+    funcao.includes('SUBCMD') || 
+    obs.includes('SUBCOMANDANTE')
+  ) {
+    return { isNaoOperacional: true, categoria: 'Subcomandante', detalhe: m?.funcao || 'Subcomandante' };
+  }
+
+  // 6. Comandante (Comandante de Batalhão, Cia, Oficiais de Comando, etc.)
+  if (
+    funcao.includes('COMANDANTE') || 
+    funcao.includes('CMT') || 
+    funcao.includes('OFICIAL / COMANDO') || 
+    obs.includes('COMANDANTE') || 
+    ['CEL', 'TEN-CEL', 'MAJ'].includes(posto)
+  ) {
+    return { isNaoOperacional: true, categoria: 'Comandante', detalhe: m?.funcao || `${posto} / Comando` };
+  }
+
+  // 7. Supervisor (Supervisores de Oficial, Supervisão de área, Auxiliar do Oficial de Operações)
+  if (
+    funcao.includes('SUPERVISOR') || 
+    funcao.includes('SUPERVISAO') || 
+    funcao.includes('AUX. DO OF') ||
+    funcao.includes('AUXILIAR DO SUPERVISOR') ||
+    situacao.includes('SUPERVISOR') ||
+    situacao.includes('AUX. DO OF') ||
+    situacao.includes('AUXILIAR DO SUPERVISOR') ||
+    obs.includes('SUPERVISOR')
+  ) {
+    return { isNaoOperacional: true, categoria: 'Supervisor', detalhe: m?.funcao || m?.situacao || 'Supervisor' };
+  }
+
+  return { isNaoOperacional: false };
+}
+
+export interface CruzamentoMilitarInfo {
+  militar?: EfetivoMilitar;
+  encontradoNoEfetivo: boolean;
+  matricula: string;
+  setorEscala: string;
+  isNaoOperacional: boolean;
+  categoriaNaoOperacional?: CategoriaNaoOperacional;
+  detalheSetor: string;
+  escalaTipo?: string;
+  funcao?: string;
+}
+
+/**
+ * Realiza o cruzamento de dados entre a relação de Férias e a Gestão de Efetivo
+ * utilizando a MATRÍCULA como identificador primário, resgatando o setor na escala
+ * (Solo, Força Tática, Base Comunitária, Administrativo, etc.) e classificando o impacto operacional real.
+ */
+export function getCruzamentoMilitar(
+  item: PrevisaoFerias, 
+  efetivo: EfetivoMilitar[]
+): CruzamentoMilitarInfo {
+  const m = findMilitarInEfetivo(item, efetivo);
+  const check = checkMilitarNaoOperacional(item, efetivo, m);
 
   // Setor ou local da escala resgatado da Gestão de Efetivo
   let setor = 'Operacional de Rua';
   if (m) {
-    setor = m.situacao || m.localEscala || m.funcao || 'Operacional de Rua';
+    setor = m.localEscala || m.situacao || m.funcao || 'Operacional de Rua';
   } else if (check.isNaoOperacional && check.categoria) {
     setor = check.categoria;
   }
@@ -280,6 +326,7 @@ interface GestaoFeriasProps {
   onUpdateFerias: (id: string, updates: Partial<PrevisaoFerias>) => void;
   onDeleteFerias: (id: string) => void;
   onImportFerias: (records: PrevisaoFerias[], mode: 'replace' | 'merge') => void;
+  onOpenImportEscalaPdf?: () => void;
 }
 
 export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
@@ -288,13 +335,16 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
   onAddFerias,
   onUpdateFerias,
   onDeleteFerias,
-  onImportFerias
+  onImportFerias,
+  onOpenImportEscalaPdf
 }) => {
   const [selectedMonth, setSelectedMonth] = useState<string>('TODOS');
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<string>('TODOS');
   const [chartViewMode, setChartViewMode] = useState<'restantes' | 'todos'>('restantes');
+  // Visualização da relação nominal: 'operacional' (retira Administrativo e Cmt Base), 'todos' (geral), ou 'descontados'
+  const [tableRosterView, setTableRosterView] = useState<'operacional' | 'todos' | 'descontados'>('operacional');
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<PrevisaoFerias | null>(null);
@@ -313,6 +363,52 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
   const currentMonthIndex = new Date().getMonth();
   const currentMonthName = MESES_DO_ANO[currentMonthIndex];
 
+  // Levantamento dos militares nas escalas específicas do efetivo do batalhão
+  const efetivoBatalhaoStats = useMemo(() => {
+    let adminCount = 0;
+    let cmtBaseCount = 0;
+    let baseComunitariaCount = 0;
+
+    efetivo.forEach(m => {
+      const sit = (m.situacao || '').toUpperCase();
+      const local = (m.localEscala || '').toUpperCase();
+      const func = (m.funcao || '').toUpperCase();
+      const guerra = (m.nomeGuerra || '').toUpperCase();
+
+      if (
+        sit === 'COMANDANTE DA BASE COMUNITARIA' || 
+        local === 'COMANDANTE DA BASE COMUNITARIA' || 
+        func === 'COMANDANTE DA BASE COMUNITARIA' ||
+        ((sit.includes('BASE') || local.includes('BASE') || func.includes('BASE')) && (sit.includes('COMANDANTE') || local.includes('COMANDANTE') || func.includes('COMANDANTE') || sit.includes('CMT'))) ||
+        guerra.includes('DAYSE')
+      ) {
+        cmtBaseCount++;
+      } else if (
+        sit.includes('ADMIN') || 
+        local.includes('ADMIN') || 
+        func.includes('ADMIN') || 
+        sit.includes('EXPEDIENTE') || 
+        local.includes('EXPEDIENTE') ||
+        sit.includes('ARMEIRO') ||
+        local.includes('ARMEIRO') ||
+        sit.includes('RESERVA DE ARMAMENTO') ||
+        local.includes('RESERVA DE ARMAMENTO') ||
+        func.includes('P1') || func.includes('P2') || func.includes('P3') || func.includes('P4') || func.includes('P5')
+      ) {
+        adminCount++;
+      } else if (sit.includes('BASE COMUNITARIA') || local.includes('BASE COMUNITARIA')) {
+        baseComunitariaCount++;
+      }
+    });
+
+    return {
+      adminCount,
+      cmtBaseCount,
+      baseComunitariaCount,
+      totalEfetivo: efetivo.length
+    };
+  }, [efetivo]);
+
   // Count by month for the selected year
   const countByMonth = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -329,12 +425,38 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
     return counts;
   }, [ferias, selectedYear]);
 
-  // Filtered list
-  const filteredFerias = useMemo(() => {
+  // Férias elegíveis pelo filtro de Ano, Mês e Status
+  const baseMonthFerias = useMemo(() => {
     return ferias.filter(item => {
       if (item.ano !== selectedYear) return false;
       if (selectedMonth !== 'TODOS' && item.mesPrevisto !== selectedMonth) return false;
       if (selectedStatus !== 'TODOS' && item.situacao !== selectedStatus) return false;
+      return true;
+    });
+  }, [ferias, selectedYear, selectedMonth, selectedStatus]);
+
+  // Contagens para os botões de alternância da visualização
+  const countOperacionaisFiltro = useMemo(() => {
+    return baseMonthFerias.filter(item => !getCruzamentoMilitar(item, efetivo).isNaoOperacional).length;
+  }, [baseMonthFerias, efetivo]);
+
+  const countDescontadosFiltro = useMemo(() => {
+    return baseMonthFerias.filter(item => getCruzamentoMilitar(item, efetivo).isNaoOperacional).length;
+  }, [baseMonthFerias, efetivo]);
+
+  // Filtered list para a tabela (com retirada opcional dos não operacionais)
+  const filteredFerias = useMemo(() => {
+    return baseMonthFerias.filter(item => {
+      const cruzamento = getCruzamentoMilitar(item, efetivo);
+
+      // Se a visualização for 'operacional', retira Administrativo e Comandante da Base Comunitária (e outros não-operacionais)
+      if (tableRosterView === 'operacional' && cruzamento.isNaoOperacional) {
+        return false;
+      }
+      // Se for 'descontados', mostra apenas quem foi retirado da escala operacional
+      if (tableRosterView === 'descontados' && !cruzamento.isNaoOperacional) {
+        return false;
+      }
 
       if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();
@@ -343,16 +465,27 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
         const guerra = (item.nomeGuerra || '').toLowerCase();
         const posto = (item.posto || '').toLowerCase();
         // Buscar também pelo nome completo do militar cadastrado no efetivo
-        const m = efetivo.find(e => e.matricula && item.matricula && e.matricula.trim() === item.matricula.trim());
+        const m = findMilitarInEfetivo(item, efetivo);
         const nomeCompletoEfetivo = (m?.nomeCompleto || '').toLowerCase();
-        if (!mat.includes(term) && !nome.includes(term) && !nomeCompletoEfetivo.includes(term) && !guerra.includes(term) && !posto.includes(term)) {
+        const setor = (cruzamento.setorEscala || '').toLowerCase();
+        const cat = (cruzamento.categoriaNaoOperacional || '').toLowerCase();
+
+        if (
+          !mat.includes(term) && 
+          !nome.includes(term) && 
+          !nomeCompletoEfetivo.includes(term) && 
+          !guerra.includes(term) && 
+          !posto.includes(term) &&
+          !setor.includes(term) &&
+          !cat.includes(term)
+        ) {
           return false;
         }
       }
 
       return true;
     });
-  }, [ferias, selectedYear, selectedMonth, selectedStatus, searchTerm, efetivo]);
+  }, [baseMonthFerias, tableRosterView, searchTerm, efetivo]);
 
   // Quick stats
   const totalAno = ferias.filter(f => f.ano === selectedYear).length;
@@ -368,7 +501,6 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
   }).length;
 
   // "PREVISTAS PARA FRUIR": soma das férias previstas para os meses que faltam ser gozadas.
-  // Exemplo: se atualmente estamos em setembro, soma as férias previstas para outubro, novembro e dezembro.
   const previstasCount = useMemo(() => {
     return ferias.filter(f => {
       if (f.ano !== selectedYear) return false;
@@ -378,13 +510,10 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
       if (monthIdx === -1) return false;
 
       if (selectedYear === currentYear) {
-        // Apenas meses estritamente posteriores ao mês atual (que ainda faltam gozar)
         return monthIdx > currentMonthIndex;
       } else if (selectedYear > currentYear) {
-        // Ano futuro: todas as férias agendadas ainda faltam ser gozadas
         return true;
       } else {
-        // Ano passado
         return false;
       }
     }).length;
@@ -408,7 +537,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
     }).length;
   }, [ferias, selectedYear, currentYear, currentMonthIndex]);
 
-  // Estatísticas operacionais por mês
+  // Estatísticas operacionais por mês: levantamento de todos de férias por mês, retirando Administrativo e Comandante da Base Comunitária
   const monthlyOperationalStats = useMemo(() => {
     const stats: Record<string, { 
       total: number; 
@@ -424,6 +553,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
         impactoOperacional: 0,
         porCategoria: {
           'Administrativo': 0,
+          'Comandante da Base Comunitária': 0,
           'Supervisor': 0,
           'Comandante': 0,
           'Subcomandante': 0,
@@ -460,6 +590,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
       let naoOperacionais = 0;
       const porCategoria: Record<CategoriaNaoOperacional, number> = {
         'Administrativo': 0,
+        'Comandante da Base Comunitária': 0,
         'Supervisor': 0,
         'Comandante': 0,
         'Subcomandante': 0,
@@ -494,6 +625,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
       impactoOperacional: 0,
       porCategoria: {
         'Administrativo': 0,
+        'Comandante da Base Comunitária': 0,
         'Supervisor': 0,
         'Comandante': 0,
         'Subcomandante': 0,
@@ -806,8 +938,19 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
               className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-bold text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer"
             >
               <Upload size={16} />
-              <span>Importar PDF ou Excel</span>
+              <span>Importar PDF ou Excel de Férias</span>
             </button>
+
+            {onOpenImportEscalaPdf && (
+              <button
+                onClick={onOpenImportEscalaPdf}
+                className="px-4 py-2.5 rounded-xl bg-emerald-900/90 hover:bg-emerald-800 text-emerald-100 font-bold text-xs flex items-center gap-2 border border-emerald-700/60 shadow-sm transition-all cursor-pointer"
+                title="Importar ou atualizar PDF com o efetivo do batalhão para cruzar as escalas Administrativo e Comandante da Base Comunitária"
+              >
+                <FileText size={16} className="text-emerald-300" />
+                <span>PDF Efetivo do Batalhão</span>
+              </button>
+            )}
 
             <button
               onClick={handleOpenAdd}
@@ -833,6 +976,32 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
               <FileText size={16} />
             </button>
           </div>
+        </div>
+
+        {/* Status do cruzamento com o Efetivo do Batalhão (PDF) */}
+        <div className="mt-5 pt-4 border-t border-emerald-800/60 flex flex-wrap items-center justify-between gap-3 text-xs text-emerald-200/90">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-900/80 border border-emerald-700 text-emerald-300 font-mono text-[11px] font-bold">
+              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+              Efetivo do Batalhão: {efetivo.length} militares
+            </span>
+            <span className="text-emerald-500">•</span>
+            <span className="text-amber-200 font-mono text-[11px]">
+              Escala Administrativo: <strong>{efetivoBatalhaoStats.adminCount}</strong>
+            </span>
+            <span className="text-emerald-500">•</span>
+            <span className="text-cyan-200 font-mono text-[11px]">
+              Comandante da Base Comunitária: <strong>{efetivoBatalhaoStats.cmtBaseCount}</strong>
+            </span>
+          </div>
+          {onOpenImportEscalaPdf && (
+            <button
+              onClick={onOpenImportEscalaPdf}
+              className="text-[11px] text-emerald-300 hover:text-white underline cursor-pointer font-sans"
+            >
+              Atualizar PDF do efetivo
+            </button>
+          )}
         </div>
 
         {/* Quick KPI stats bar */}
@@ -1181,32 +1350,98 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
         </div>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="bg-white p-4 rounded-2xl border border-line shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
-        <div className="relative flex-1 w-full">
-          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink/40" />
-          <input
-            type="text"
-            placeholder="Pesquisar por nome, nome de guerra, posto ou matrícula..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-slate-50 rounded-xl border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-emerald-800/20 focus:border-emerald-800 transition-all"
-          />
+      {/* Filter, Search Bar and View Mode Switcher */}
+      <div className="bg-white p-4 rounded-2xl border border-line shadow-xs space-y-3">
+        
+        {/* Abas de Modo de Visualização da Relação Nominal */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-line">
+          <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl flex-wrap">
+            <button
+              onClick={() => setTableRosterView('operacional')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                tableRosterView === 'operacional'
+                  ? 'bg-emerald-800 text-white shadow-xs ring-1 ring-emerald-900'
+                  : 'text-ink/70 hover:text-ink hover:bg-white/60'
+              }`}
+            >
+              <ShieldAlert size={14} className={tableRosterView === 'operacional' ? 'text-amber-300' : 'text-emerald-700'} />
+              <span>Impacto Operacional ({countOperacionaisFiltro})</span>
+              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${
+                tableRosterView === 'operacional' ? 'bg-emerald-950 text-emerald-200' : 'bg-slate-200 text-slate-700'
+              }`}>
+                Viaturas / Rua
+              </span>
+            </button>
+
+            <button
+              onClick={() => setTableRosterView('todos')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                tableRosterView === 'todos'
+                  ? 'bg-emerald-800 text-white shadow-xs ring-1 ring-emerald-900'
+                  : 'text-ink/70 hover:text-ink hover:bg-white/60'
+              }`}
+            >
+              <Users size={14} />
+              <span>Todos Agendados ({baseMonthFerias.length})</span>
+            </button>
+
+            <button
+              onClick={() => setTableRosterView('descontados')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                tableRosterView === 'descontados'
+                  ? 'bg-amber-800 text-white shadow-xs ring-1 ring-amber-900'
+                  : 'text-ink/70 hover:text-ink hover:bg-white/60'
+              }`}
+            >
+              <Layers size={14} className={tableRosterView === 'descontados' ? 'text-white' : 'text-amber-700'} />
+              <span>Retirados da Escala ({countDescontadosFiltro})</span>
+              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${
+                tableRosterView === 'descontados' ? 'bg-amber-950 text-amber-200' : 'bg-slate-200 text-slate-700'
+              }`}>
+                Admin / Cmt Base
+              </span>
+            </button>
+          </div>
+
+          <div className="text-xs text-ink/60 flex items-center gap-1 font-mono">
+            <span>Filtro ativo:</span>
+            <span className="font-semibold text-emerald-900">
+              {tableRosterView === 'operacional' 
+                ? 'Excluindo Administrativo e Cmt da Base Comunitária' 
+                : tableRosterView === 'descontados'
+                ? 'Listando apenas Administrativo e Cmt da Base Comunitária'
+                : 'Exibindo efetivo geral agendado'}
+            </span>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 w-full md:w-auto">
-          {/* Status Filter */}
-          <select
-            value={selectedStatus}
-            onChange={(e) => setSelectedStatus(e.target.value)}
-            className="bg-slate-50 border border-line text-xs rounded-xl px-3 py-2 text-ink font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-800"
-          >
-            <option value="TODOS">Todos Status</option>
-            <option value="Prevista">Prevista</option>
-            <option value="Em Gozo">Em Gozo</option>
-            <option value="Concluída">Concluída</option>
-            <option value="Interrompida">Interrompida</option>
-          </select>
+        {/* Campo de Pesquisa e Filtros */}
+        <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+          <div className="relative flex-1 w-full">
+            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink/40" />
+            <input
+              type="text"
+              placeholder="Pesquisar por nome, nome de guerra, posto, matrícula ou setor da escala..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 bg-slate-50 rounded-xl border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-emerald-800/20 focus:border-emerald-800 transition-all"
+            />
+          </div>
+
+          <div className="flex items-center gap-2 w-full md:w-auto">
+            {/* Status Filter */}
+            <select
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value)}
+              className="bg-slate-50 border border-line text-xs rounded-xl px-3 py-2 text-ink font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-800"
+            >
+              <option value="TODOS">Todos Status</option>
+              <option value="Prevista">Prevista</option>
+              <option value="Em Gozo">Em Gozo</option>
+              <option value="Concluída">Concluída</option>
+              <option value="Interrompida">Interrompida</option>
+            </select>
+          </div>
         </div>
       </div>
 
