@@ -10,11 +10,12 @@ import {
   Layers,
   ChevronRight,
   CheckCircle2,
-  Calendar
+  Calendar,
+  Stethoscope
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
-import { EfetivoMilitar, DashboardMetrics } from './types';
+import { EfetivoMilitar, DashboardMetrics, DispensaMedicaLTS } from './types';
 import { 
   getEfetivo, 
   saveEfetivo,
@@ -31,6 +32,7 @@ import { Dashboard } from './components/Dashboard';
 import { GestaoEfetivo } from './components/GestaoEfetivo';
 import { GestaoServicosExtras } from './components/GestaoServicosExtras';
 import { GestaoFerias } from './components/GestaoFerias';
+import { GestaoDispensas } from './components/GestaoDispensas';
 import { ImportEfetivoModal } from './components/ImportEfetivoModal';
 import { ImportEscalaPdfModal } from './components/ImportEscalaPdfModal';
 import { 
@@ -43,13 +45,20 @@ import {
   importFeriasReplace, 
   importFeriasMerge 
 } from './services/feriasDatabase';
+import { 
+  getDispensas, 
+  addDispensa, 
+  updateDispensa, 
+  deleteDispensa 
+} from './services/dispensasDatabase';
 import { PrevisaoFerias } from './types';
 import { MESES_DO_ANO } from './services/feriasFileParser';
 
 export default function App() {
-  const [mainTab, setMainTab] = useState<'dashboard' | 'efetivo' | 'extras' | 'ferias'>('dashboard');
+  const [mainTab, setMainTab] = useState<'dashboard' | 'efetivo' | 'extras' | 'ferias' | 'dispensas'>('dashboard');
   const [efetivo, setEfetivo] = useState<EfetivoMilitar[]>([]);
   const [ferias, setFerias] = useState<PrevisaoFerias[]>([]);
+  const [dispensas, setDispensas] = useState<DispensaMedicaLTS[]>([]);
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -59,6 +68,11 @@ export default function App() {
   const currentMonthIndex = new Date().getMonth();
   const currentMonthName = MESES_DO_ANO[currentMonthIndex];
   const currentYear = new Date().getFullYear();
+
+  // Dispensas ativas no momento
+  const dispensasAtivasCount = useMemo(() => {
+    return dispensas.filter(d => d.situacao === 'Em Andamento').length;
+  }, [dispensas]);
 
   // Férias no mês vigente
   const feriasMesVigenteCount = useMemo(() => {
@@ -90,6 +104,8 @@ export default function App() {
     setMetrics(calculateDashboardMetrics(loaded));
     const loadedFerias = getPrevisaoFerias(loaded);
     setFerias(loadedFerias);
+    const loadedDispensas = getDispensas(loaded);
+    setDispensas(loadedDispensas);
   }, []);
 
   // Update metrics whenever efetivo changes and persist
@@ -232,40 +248,88 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 5000);
   };
 
+  // Handlers for Dispensas Médicas & LTS
+  const handleAddDispensa = (record: Omit<DispensaMedicaLTS, 'id' | 'criadoEm'>) => {
+    const created = addDispensa(record);
+    const updated = [created, ...dispensas];
+    setDispensas(updated);
+
+    // Se militar cadastrado no efetivo, sincroniza situação
+    const match = efetivo.find(m => m.matricula === record.matricula);
+    if (match) {
+      const situacaoSaude = record.tipo === 'LTS' ? 'LTS' : 'Dispensa Recompensa';
+      handleUpdateMilitar(match.id, { 
+        situacao: situacaoSaude,
+        dataRetorno: record.dataFimPrevista,
+        observacao: `${record.tipo}${record.cid ? ` (CID: ${record.cid})` : ''} - Retorno previsto: ${record.dataFimPrevista}`
+      });
+    }
+
+    setToastMessage(`Dispensa/LTS cadastrada para ${record.nome} (${record.diasAfastamento} dias).`);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  const handleUpdateDispensa = (id: string, updates: Partial<DispensaMedicaLTS>) => {
+    const updated = updateDispensa(id, updates);
+    setDispensas(updated);
+
+    const item = updated.find(d => d.id === id);
+    if (item) {
+      const match = efetivo.find(m => m.matricula === item.matricula);
+      if (match) {
+        if (updates.situacao === 'Concluída' && (match.situacao === 'LTS' || match.situacao === 'Dispensa Recompensa')) {
+          handleUpdateMilitar(match.id, { situacao: 'Pronto' });
+        }
+      }
+    }
+
+    setToastMessage('Registro de dispensa médica/LTS atualizado.');
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleDeleteDispensa = (id: string) => {
+    const updated = deleteDispensa(id);
+    setDispensas(updated);
+    setToastMessage('Registro de dispensa/LTS excluído.');
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-ink flex flex-col font-sans selection:bg-blue-950 selection:text-white">
       {/* Top Main Navigation Bar */}
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-line shadow-2xs">
         <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 h-18 flex items-center justify-between gap-4">
-          {/* Logo & Battalion Identification */}
+          {/* Logo & Battalion Identification com Brasão Oficial */}
           <div 
             onClick={() => setMainTab('dashboard')}
-            className="flex items-center gap-3 cursor-pointer group"
+            className="flex items-center gap-3 cursor-pointer group shrink-0"
           >
-            <div className="w-10 h-10 rounded-xl bg-blue-950 text-white flex items-center justify-center shadow-md group-hover:scale-105 transition-all">
-              <ShieldCheck size={22} className="text-blue-400" />
-            </div>
+            <img 
+              src="/brasao_4bpm.jpg" 
+              alt="Brasão do 4º Batalhão de Polícia Militar" 
+              className="w-10 h-12 sm:w-11 sm:h-13 object-contain drop-shadow-md group-hover:scale-105 transition-all shrink-0" 
+            />
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-sm font-black tracking-tight text-ink uppercase">
-                  4º BPM / CPMR
+                <span className="text-xs sm:text-sm font-black tracking-tight text-ink uppercase">
+                  4º Batalhão de Polícia Militar
                 </span>
-                <span className="hidden sm:inline-block text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-100 text-blue-900 font-bold">
-                  Efetivo Ativo
+                <span className="hidden lg:inline-block text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-100 text-blue-900 font-bold">
+                  CPMR
                 </span>
               </div>
-              <p className="text-[11px] text-ink/50 font-mono hidden sm:block">
-                Gestão de Efetivo & Serviços Extras
+              <p className="text-[10px] sm:text-[11px] text-ink/50 font-mono hidden sm:block">
+                Gestão Integrada de Efetivo, Férias & LTS
               </p>
             </div>
           </div>
 
           {/* Main Module Tabs Navigation */}
-          <nav className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-2xl border border-line/80">
+          <nav className="flex items-center gap-1 sm:gap-1.5 p-1 bg-slate-100 rounded-2xl border border-line/80 overflow-x-auto">
             <button
               onClick={() => setMainTab('dashboard')}
               className={cn(
-                "flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer",
+                "flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0",
                 mainTab === 'dashboard'
                   ? "bg-blue-950 text-white shadow-xs"
                   : "text-ink/60 hover:text-ink hover:bg-white/60"
@@ -279,15 +343,15 @@ export default function App() {
             <button
               onClick={() => setMainTab('efetivo')}
               className={cn(
-                "flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer",
+                "flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0",
                 mainTab === 'efetivo'
                   ? "bg-blue-950 text-white shadow-xs"
                   : "text-ink/60 hover:text-ink hover:bg-white/60"
               )}
             >
               <Users size={15} />
-              <span className="hidden sm:inline">Gestão de Efetivo</span>
-              <span className="sm:hidden">Efetivo</span>
+              <span className="hidden md:inline">Gestão de Efetivo</span>
+              <span className="md:hidden">Efetivo</span>
               {efetivo.length > 0 && (
                 <span className={cn(
                   "text-[10px] font-mono px-1.5 py-0.2 rounded-full",
@@ -299,23 +363,32 @@ export default function App() {
             </button>
 
             <button
-              onClick={() => setMainTab('extras')}
+              onClick={() => setMainTab('dispensas')}
               className={cn(
-                "flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer",
-                mainTab === 'extras'
-                  ? "bg-amber-600 text-white shadow-xs"
-                  : "text-amber-900 bg-amber-500/10 hover:bg-amber-500/20"
+                "flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0",
+                mainTab === 'dispensas'
+                  ? "bg-blue-950 text-white shadow-xs"
+                  : "text-ink/60 hover:text-ink hover:bg-white/60"
               )}
+              title={`Dispensas Médicas e LTS: ${dispensasAtivasCount} ativas`}
             >
-              <CalendarCheck size={15} />
-              <span className="hidden md:inline">Gestão de serviços extras</span>
-              <span className="md:hidden">Serviços Extras</span>
+              <Stethoscope size={15} />
+              <span className="hidden lg:inline">Dispensas & LTS</span>
+              <span className="lg:hidden">Dispensas</span>
+              {dispensasAtivasCount > 0 && (
+                <span className={cn(
+                  "text-[10px] font-mono px-1.5 py-0.2 rounded-full",
+                  mainTab === 'dispensas' ? "bg-white/20 text-white" : "bg-cyan-100 text-cyan-900 font-bold"
+                )}>
+                  {dispensasAtivasCount}
+                </span>
+              )}
             </button>
 
             <button
               onClick={() => setMainTab('ferias')}
               className={cn(
-                "flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer",
+                "flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0",
                 mainTab === 'ferias'
                   ? "bg-blue-950 text-white shadow-xs"
                   : "text-ink/60 hover:text-ink hover:bg-white/60"
@@ -332,6 +405,20 @@ export default function App() {
                   {feriasMesVigenteCount}
                 </span>
               )}
+            </button>
+
+            <button
+              onClick={() => setMainTab('extras')}
+              className={cn(
+                "flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0",
+                mainTab === 'extras'
+                  ? "bg-amber-600 text-white shadow-xs"
+                  : "text-amber-900 bg-amber-500/10 hover:bg-amber-500/20"
+              )}
+            >
+              <CalendarCheck size={15} />
+              <span className="hidden md:inline">Serviços Extras</span>
+              <span className="md:hidden">Extras</span>
             </button>
           </nav>
         </div>
@@ -369,12 +456,32 @@ export default function App() {
                 metrics={metrics}
                 efetivo={efetivo}
                 ferias={ferias}
+                dispensas={dispensas}
                 onNavigateToExtras={() => setMainTab('extras')}
                 onNavigateToEfetivo={() => setMainTab('efetivo')}
                 onNavigateToFerias={() => setMainTab('ferias')}
+                onNavigateToDispensas={() => setMainTab('dispensas')}
                 onOpenAddModal={() => setIsAddModalOpen(true)}
                 onOpenImportModal={() => setIsImportModalOpen(true)}
                 onOpenImportPdfModal={() => setIsImportPdfModalOpen(true)}
+              />
+            </motion.div>
+          )}
+
+          {mainTab === 'dispensas' && (
+            <motion.div
+              key="tab-dispensas"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.18 }}
+            >
+              <GestaoDispensas
+                dispensas={dispensas}
+                efetivo={efetivo}
+                onAddDispensa={handleAddDispensa}
+                onUpdateDispensa={handleUpdateDispensa}
+                onDeleteDispensa={handleDeleteDispensa}
               />
             </motion.div>
           )}

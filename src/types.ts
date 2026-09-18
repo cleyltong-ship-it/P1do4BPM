@@ -152,3 +152,25 @@ export interface PrevisaoFerias {
   observacao?: string;
   categoria?: CategoriaEscalaFerias; // Classificação manual: Operacional, Administrativo, P2, Oficiais, À Disposição
 }
+
+export type TipoAfastamentoSaude = 'LTS' | 'Dispensa Médica' | 'Licença Médica' | 'Outro';
+
+export interface DispensaMedicaLTS {
+  id: string;
+  matricula: string;
+  nome: string;
+  nomeGuerra?: string;
+  postoGraduacao: PostoGraduacao;
+  tipo: TipoAfastamentoSaude;
+  diasAfastamento: number;
+  dataInicio: string; // YYYY-MM-DD
+  dataFimPrevista: string; // YYYY-MM-DD
+  cid?: string; // Código CID (ex: M54.5, J06, etc.)
+  descricaoCid?: string;
+  medicoOuJunta?: string; // Nome do médico ou CRM ou JMS
+  situacao: 'Em Andamento' | 'Concluída' | 'Prevista';
+  observacoes?: string;
+  documentoOrigem?: string; // Nome do arquivo PDF ou JPG anexado
+  criadoEm: string;
+}
+

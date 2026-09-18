@@ -181,6 +181,7 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
   const [chartViewMode, setChartViewMode] = useState<'restantes' | 'todos'>('restantes');
   // Visualização da relação nominal: 'operacional' (apenas rua), 'todos' (geral), ou 'descontados' (admin/p2/oficiais/ad)
   const [tableRosterView, setTableRosterView] = useState<'operacional' | 'todos' | 'descontados'>('operacional');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<PrevisaoFerias | null>(null);
@@ -588,6 +589,28 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
     }
 
     setIsAddModalOpen(false);
+  };
+
+  const handleBulkUpdateCategoria = (novaCat: CategoriaEscalaFerias) => {
+    if (selectedIds.length === 0) return;
+    selectedIds.forEach(id => {
+      onUpdateFerias(id, { categoria: novaCat });
+    });
+    setSelectedIds([]);
+  };
+
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAllFiltered = () => {
+    if (selectedIds.length === filteredFerias.length && filteredFerias.length > 0) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filteredFerias.map(f => f.id));
+    }
   };
 
   // Export to Excel
@@ -1220,9 +1243,76 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
           </div>
           
           <span className="text-xs font-mono font-bold px-3 py-1 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-200 self-start sm:self-auto">
-            {filteredFerias.length} selecionados
+            {filteredFerias.length} militares listados
           </span>
         </div>
+
+        {/* Barra de Classificação em Lote quando houver militares selecionados */}
+        {selectedIds.length > 0 && (
+          <div className="bg-slate-900 text-white p-3.5 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg border border-slate-700 animate-in fade-in duration-150">
+            <div className="flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-blue-500 text-white text-xs font-mono font-bold flex items-center justify-center shadow-xs">
+                {selectedIds.length}
+              </span>
+              <span className="text-xs font-bold text-white">
+                {selectedIds.length === 1 ? '1 militar selecionado' : `${selectedIds.length} militares selecionados`}:
+              </span>
+              <span className="text-[11px] text-slate-300">
+                Classificar selecionados em lote:
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => handleBulkUpdateCategoria('Operacional')}
+                className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                title="Manter como Operacional (entra no cálculo do desfalque das viaturas)"
+              >
+                🛡️ Operacional
+              </button>
+              <button
+                type="button"
+                onClick={() => handleBulkUpdateCategoria('Administrativo')}
+                className="px-2.5 py-1.5 bg-amber-700 hover:bg-amber-600 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                title="Descontar como Administrativo (fora do cálculo)"
+              >
+                🏢 Administrativo
+              </button>
+              <button
+                type="button"
+                onClick={() => handleBulkUpdateCategoria('P2')}
+                className="px-2.5 py-1.5 bg-purple-700 hover:bg-purple-600 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                title="Descontar como P2 / Inteligência (fora do cálculo)"
+              >
+                🕵️ P2
+              </button>
+              <button
+                type="button"
+                onClick={() => handleBulkUpdateCategoria('Oficiais')}
+                className="px-2.5 py-1.5 bg-blue-700 hover:bg-blue-600 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                title="Descontar como Oficiais (fora do cálculo)"
+              >
+                ⭐ Oficiais
+              </button>
+              <button
+                type="button"
+                onClick={() => handleBulkUpdateCategoria('À Disposição')}
+                className="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                title="Descontar como À Disposição (fora do cálculo)"
+              >
+                📋 À Disposição
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedIds([])}
+                className="px-2 py-1 text-slate-400 hover:text-white text-xs underline cursor-pointer ml-1"
+              >
+                Desmarcar
+              </button>
+            </div>
+          </div>
+        )}
 
         {filteredFerias.length === 0 ? (
           <div className="py-16 text-center text-ink/50 space-y-3">
@@ -1237,6 +1327,15 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-line bg-slate-100/80 text-[11px] font-bold text-ink/70 uppercase tracking-wider">
+                  <th className="py-3 px-3 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.length === filteredFerias.length && filteredFerias.length > 0}
+                      onChange={handleSelectAllFiltered}
+                      title="Selecionar todos os militares visíveis para classificação em lote"
+                      className="cursor-pointer rounded border-line text-blue-950 focus:ring-blue-800"
+                    />
+                  </th>
                   <th className="py-3 px-4">Posto / Nome Completo</th>
                   <th className="py-3 px-4">Classificação / Impacto</th>
                   <th className="py-3 px-4">Matrícula</th>
@@ -1251,9 +1350,18 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
                   const cat = getMilitarCategoria(item);
                   const cfg = CATEGORIAS_CONFIG[cat];
                   const isDescontado = isDescontadoOperacional(cat);
+                  const isSelected = selectedIds.includes(item.id);
 
                   return (
-                  <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
+                  <tr key={item.id} className={`transition-colors ${isSelected ? 'bg-blue-50/60' : 'hover:bg-slate-50/80'}`}>
+                    <td className="py-3 px-3 text-center">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleToggleSelect(item.id)}
+                        className="cursor-pointer rounded border-line text-blue-950 focus:ring-blue-800"
+                      />
+                    </td>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2.5">
                         <span className="w-14 shrink-0 font-mono font-bold text-emerald-950 bg-emerald-50 px-2 py-0.5 rounded text-center border border-emerald-200">
@@ -1268,9 +1376,9 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
                       </div>
                     </td>
 
-                    {/* Classificação Manual e Imediata do Militar */}
-                    <td className="py-3 px-4">
-                      <div className="space-y-1">
+                    {/* Classificação Manual e Imediata do Militar com 1 clique */}
+                    <td className="py-3 px-4 min-w-[240px]">
+                      <div className="space-y-1.5">
                         <div className="flex items-center gap-1.5">
                           <select
                             value={cat}
@@ -1297,6 +1405,70 @@ export const GestaoFerias: React.FC<GestaoFeriasProps> = ({
                             <option value="Oficiais">⭐ Oficiais [Fora]</option>
                             <option value="À Disposição">📋 À Disposição [Fora]</option>
                           </select>
+                        </div>
+
+                        {/* Botões de Ação Rápida de 1 Clique */}
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => onUpdateFerias(item.id, { categoria: 'Operacional' })}
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold font-mono transition-all cursor-pointer ${
+                              cat === 'Operacional'
+                                ? 'bg-emerald-600 text-white shadow-2xs ring-1 ring-emerald-700'
+                                : 'bg-slate-100 text-slate-600 hover:bg-emerald-100 hover:text-emerald-900'
+                            }`}
+                            title="Clique para definir como Operacional (Rua)"
+                          >
+                            🛡️ Rua
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onUpdateFerias(item.id, { categoria: 'Administrativo' })}
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold font-mono transition-all cursor-pointer ${
+                              cat === 'Administrativo'
+                                ? 'bg-amber-600 text-white shadow-2xs ring-1 ring-amber-700'
+                                : 'bg-slate-100 text-slate-600 hover:bg-amber-100 hover:text-amber-900'
+                            }`}
+                            title="Clique para descontar como Administrativo"
+                          >
+                            🏢 Admin
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onUpdateFerias(item.id, { categoria: 'P2' })}
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold font-mono transition-all cursor-pointer ${
+                              cat === 'P2'
+                                ? 'bg-purple-600 text-white shadow-2xs ring-1 ring-purple-700'
+                                : 'bg-slate-100 text-slate-600 hover:bg-purple-100 hover:text-purple-900'
+                            }`}
+                            title="Clique para descontar como P2"
+                          >
+                            🕵️ P2
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onUpdateFerias(item.id, { categoria: 'Oficiais' })}
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold font-mono transition-all cursor-pointer ${
+                              cat === 'Oficiais'
+                                ? 'bg-blue-600 text-white shadow-2xs ring-1 ring-blue-700'
+                                : 'bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-900'
+                            }`}
+                            title="Clique para descontar como Oficial"
+                          >
+                            ⭐ Oficial
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onUpdateFerias(item.id, { categoria: 'À Disposição' })}
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold font-mono transition-all cursor-pointer ${
+                              cat === 'À Disposição'
+                                ? 'bg-slate-700 text-white shadow-2xs ring-1 ring-slate-800'
+                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+                            }`}
+                            title="Clique para descontar como À Disposição"
+                          >
+                            📋 AD
+                          </button>
                         </div>
 
                         <div className="text-[10px] font-mono">

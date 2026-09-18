@@ -261,19 +261,35 @@ export const ImportFeriasModal: React.FC<ImportFeriasModalProps> = ({
               </div>
 
               {/* Stats badges */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 <div className="p-3 bg-slate-50 rounded-xl border border-line text-center">
-                  <span className="text-[10px] uppercase font-mono text-ink/50">Total Previsto</span>
+                  <span className="text-[10px] uppercase font-mono font-bold text-ink/50">Total Previsto</span>
                   <div className="text-xl font-mono font-black text-ink mt-0.5">{parseResult.totalParsed}</div>
+                  <span className="text-[10px] text-ink/40">militares no arquivo</span>
                 </div>
-                <div className="p-3 bg-slate-50 rounded-xl border border-line text-center">
-                  <span className="text-[10px] uppercase font-mono text-ink/50">No Banco do Btl</span>
-                  <div className="text-xl font-mono font-black text-emerald-800 mt-0.5">{parseResult.matchedWithEfetivo}</div>
+                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-center">
+                  <span className="text-[10px] uppercase font-mono font-bold text-emerald-800/80">Impacto Operacional</span>
+                  <div className="text-xl font-mono font-black text-emerald-900 mt-0.5">{parseResult.operacionaisCount}</div>
+                  <span className="text-[10px] text-emerald-700">viaturas / rua</span>
                 </div>
-                <div className="p-3 bg-slate-50 rounded-xl border border-line text-center">
-                  <span className="text-[10px] uppercase font-mono text-ink/50">Meses Detectados</span>
-                  <div className="text-xl font-mono font-black text-blue-700 mt-0.5">{parseResult.monthsFound.length}</div>
+                <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-center">
+                  <span className="text-[10px] uppercase font-mono font-bold text-amber-800/80">Descontados</span>
+                  <div className="text-xl font-mono font-black text-amber-900 mt-0.5">{parseResult.descontadosCount}</div>
+                  <span className="text-[10px] text-amber-700">Admin/P2/Oficiais/AD</span>
                 </div>
+                <div className="p-3 bg-blue-50 rounded-xl border border-blue-200 text-center">
+                  <span className="text-[10px] uppercase font-mono font-bold text-blue-800/80">Meses Mapeados</span>
+                  <div className="text-xl font-mono font-black text-blue-900 mt-0.5">{parseResult.monthsFound.length}</div>
+                  <span className="text-[10px] text-blue-700">ao longo do ano</span>
+                </div>
+              </div>
+
+              {/* Informative notice on operational discount */}
+              <div className="p-3 rounded-xl bg-blue-50/70 border border-blue-200/60 text-xs text-blue-950 flex items-start gap-2">
+                <CheckCircle2 size={16} className="text-blue-700 shrink-0 mt-0.5" />
+                <p className="text-[11px] leading-relaxed">
+                  <strong>Sem cruzamento forçado com o cadastro:</strong> Os dados de férias são lidos diretamente do arquivo. Na tabela você poderá ajustar qualquer militar como <strong>Administrativo, P2, Oficiais ou À Disposição</strong> com apenas 1 clique para descontá-lo do impacto operacional.
+                </p>
               </div>
 
               {/* Months tags */}

@@ -258,6 +258,8 @@ function cleanMatricula(val: any): string {
 export interface ParseFeriasResult {
   records: PrevisaoFerias[];
   totalParsed: number;
+  operacionaisCount: number;
+  descontadosCount: number;
   matchedWithEfetivo: number;
   monthsFound: string[];
   filename: string;
@@ -981,14 +983,15 @@ export async function parseExcelFerias(
     }
   }
 
-  const matchedWithEfetivo = records.filter(r => 
-    efetivoList.some(m => cleanMatricula(m.matricula) === cleanMatricula(r.matricula))
-  ).length;
+  const operacionaisCount = records.filter(r => (r.categoria || 'Operacional') === 'Operacional').length;
+  const descontadosCount = records.length - operacionaisCount;
 
   return {
     records,
     totalParsed: records.length,
-    matchedWithEfetivo,
+    operacionaisCount,
+    descontadosCount,
+    matchedWithEfetivo: records.length,
     monthsFound: Array.from(monthsFound),
     filename: file.name,
     sourceType: 'excel'
@@ -1176,14 +1179,15 @@ export async function parsePdfFerias(
     }
   }
 
-  const matchedWithEfetivo = records.filter(r => 
-    efetivoList.some(m => cleanMatricula(m.matricula) === cleanMatricula(r.matricula))
-  ).length;
+  const operacionaisCount = records.filter(r => (r.categoria || 'Operacional') === 'Operacional').length;
+  const descontadosCount = records.length - operacionaisCount;
 
   return {
     records,
     totalParsed: records.length,
-    matchedWithEfetivo,
+    operacionaisCount,
+    descontadosCount,
+    matchedWithEfetivo: records.length,
     monthsFound: Array.from(monthsFound),
     filename: file.name,
     sourceType: 'pdf'
