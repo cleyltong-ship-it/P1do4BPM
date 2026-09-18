@@ -18,55 +18,72 @@ export const MESES_DO_ANO: MesAno[] = [
   'Dezembro'
 ];
 
-export function normalizeMes(val: any): MesAno {
-  if (!val && val !== 0) return 'Janeiro';
+export function detectMes(val: any): MesAno | null {
+  if (val === null || val === undefined || val === '') return null;
 
-  // If val is a number (could be 1-12 or Excel serial date)
+  // Number 1-12
   if (typeof val === 'number') {
     if (val >= 1 && val <= 12) {
       return MESES_DO_ANO[Math.floor(val) - 1];
     }
-    // Excel serial date (e.g. 45000 is around 2023)
-    if (val > 30000 && val < 60000) {
+    // Excel serial date (e.g. 35000 - 65000)
+    if (val > 25000 && val < 65000) {
       const date = new Date((val - 25569) * 86400 * 1000);
-      const monthIdx = date.getUTCMonth();
-      if (monthIdx >= 0 && monthIdx < 12) {
-        return MESES_DO_ANO[monthIdx];
+      const mIdx = date.getUTCMonth();
+      if (mIdx >= 0 && mIdx < 12) {
+        return MESES_DO_ANO[mIdx];
       }
     }
   }
 
-  const str = String(val).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+  const raw = String(val).trim();
+  if (!raw) return null;
 
-  // If string contains date pattern DD/MM/AAAA or DD/MM
-  const dateMatch = str.match(/\b\d{1,2}[\/\.-](\d{1,2})([\/\.-]\d{2,4})?\b/);
+  const norm = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .trim();
+
+  // Pure integer number 1-12 as string
+  if (/^0?[1-9]$|^1[0-2]$/.test(norm)) {
+    const num = parseInt(norm, 10);
+    return MESES_DO_ANO[num - 1];
+  }
+
+  // Date pattern with month: DD/MM/AAAA or DD/MM or AAAA-MM-DD
+  const isoMatch = norm.match(/^\d{4}[-/](\d{1,2})[-/]\d{1,2}/);
+  if (isoMatch) {
+    const num = parseInt(isoMatch[1], 10);
+    if (num >= 1 && num <= 12) return MESES_DO_ANO[num - 1];
+  }
+
+  const dateMatch = norm.match(/\b\d{1,2}[\/\.-](\d{1,2})([\/\.-]\d{2,4})?\b/);
   if (dateMatch && dateMatch[1]) {
-    const monthNum = parseInt(dateMatch[1], 10);
-    if (monthNum >= 1 && monthNum <= 12) {
-      return MESES_DO_ANO[monthNum - 1];
-    }
+    const num = parseInt(dateMatch[1], 10);
+    if (num >= 1 && num <= 12) return MESES_DO_ANO[num - 1];
   }
 
-  // Pure integer number 1-12 as string (e.g. "1", "01", "02"..."12")
-  const pureNum = parseInt(str, 10);
-  if (!isNaN(pureNum) && pureNum >= 1 && pureNum <= 12 && /^\d{1,2}$/.test(str)) {
-    return MESES_DO_ANO[pureNum - 1];
-  }
+  // Match month full names or standard 3-letter abbreviations
+  if (/\b(SETEMBRO|SETE|SET)\b/i.test(norm) || norm.includes('SETEMBRO') || /(^|[\/\s_-])SET([\/\s_-\d]|$)/i.test(norm)) return 'Setembro';
+  if (/\b(JANEIRO|JAN)\b/i.test(norm) || norm.includes('JANEIRO') || /(^|[\/\s_-])JAN([\/\s_-\d]|$)/i.test(norm)) return 'Janeiro';
+  if (/\b(FEVEREIRO|FEV)\b/i.test(norm) || norm.includes('FEVEREIRO') || /(^|[\/\s_-])FEV([\/\s_-\d]|$)/i.test(norm)) return 'Fevereiro';
+  if (/\b(MARCO|MARÇO|MAR)\b/i.test(norm) || norm.includes('MARCO') || norm.includes('MARÇO') || /(^|[\/\s_-])MAR([\/\s_-\d]|$)/i.test(norm)) return 'Março';
+  if (/\b(ABRIL|ABR)\b/i.test(norm) || norm.includes('ABRIL') || /(^|[\/\s_-])ABR([\/\s_-\d]|$)/i.test(norm)) return 'Abril';
+  if (/\b(MAIO|MAI)\b/i.test(norm) || norm.includes('MAIO') || /(^|[\/\s_-])MAI([\/\s_-\d]|$)/i.test(norm)) return 'Maio';
+  if (/\b(JUNHO|JUN)\b/i.test(norm) || norm.includes('JUNHO') || /(^|[\/\s_-])JUN([\/\s_-\d]|$)/i.test(norm)) return 'Junho';
+  if (/\b(JULHO|JUL)\b/i.test(norm) || norm.includes('JULHO') || /(^|[\/\s_-])JUL([\/\s_-\d]|$)/i.test(norm)) return 'Julho';
+  if (/\b(AGOSTO|AGO)\b/i.test(norm) || norm.includes('AGOSTO') || /(^|[\/\s_-])AGO([\/\s_-\d]|$)/i.test(norm)) return 'Agosto';
+  if (/\b(OUTUBRO|OUTU|OUT)\b/i.test(norm) || norm.includes('OUTUBRO') || /(^|[\/\s_-])OUT([\/\s_-\d]|$)/i.test(norm)) return 'Outubro';
+  if (/\b(NOVEMBRO|NOVE|NOV)\b/i.test(norm) || norm.includes('NOVEMBRO') || /(^|[\/\s_-])NOV([\/\s_-\d]|$)/i.test(norm)) return 'Novembro';
+  if (/\b(DEZEMBRO|DEZE|DEZ)\b/i.test(norm) || norm.includes('DEZEMBRO') || /(^|[\/\s_-])DEZ([\/\s_-\d]|$)/i.test(norm)) return 'Dezembro';
 
-  if (str.includes('JAN')) return 'Janeiro';
-  if (str.includes('FEV')) return 'Fevereiro';
-  if (str.includes('MAR')) return 'Março';
-  if (str.includes('ABR')) return 'Abril';
-  if (str.includes('MAI')) return 'Maio';
-  if (str.includes('JUN')) return 'Junho';
-  if (str.includes('JUL')) return 'Julho';
-  if (str.includes('AGO')) return 'Agosto';
-  if (str.includes('SET')) return 'Setembro';
-  if (str.includes('OUT')) return 'Outubro';
-  if (str.includes('NOV')) return 'Novembro';
-  if (str.includes('DEZ')) return 'Dezembro';
+  return null;
+}
 
-  return 'Janeiro';
+export function normalizeMes(val: any, defaultMonth: MesAno = 'Janeiro'): MesAno {
+  const detected = detectMes(val);
+  return detected !== null ? detected : defaultMonth;
 }
 
 export function parseAno(val: any, defaultYear: number = new Date().getFullYear()): number {
@@ -117,40 +134,48 @@ export function parseDias(val: any): number {
   return 30;
 }
 
-function isHeaderOrExcludedName(val: string): boolean {
-  if (!val || val.trim().length < 2) return true;
-  const upper = val
+function cleanDigits(val: any): string {
+  if (!val) return '';
+  return String(val).replace(/\D/g, '');
+}
+
+function normalizeSimple(str: string): string {
+  return (str || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toUpperCase()
     .trim();
+}
+
+function isHeaderOrExcludedName(val: string): boolean {
+  if (!val || val.trim().length < 2) return true;
+  const upper = normalizeSimple(val);
 
   // If pure numbers or symbols or date pattern
   if (!/[A-Z]/.test(upper)) return true;
   if (/^\d{1,2}[\/\.-]\d{1,2}([\/\.-]\d{2,4})?$/.test(upper)) return true;
 
+  // Month names are NOT person names!
+  for (const m of MESES_DO_ANO) {
+    const mNorm = normalizeSimple(m);
+    if (upper === mNorm || upper === mNorm.slice(0, 3) || upper.startsWith(`MES DE ${mNorm}`) || upper.startsWith(`MES:`)) {
+      return true;
+    }
+  }
+
   // Header tokens
-  if (
-    upper === 'NOME' ||
-    upper === 'NOME COMPLETO' ||
-    upper === 'NOME DO MILITAR' ||
-    upper === 'NOME DO POLICIAL' ||
-    upper === 'NOME DE GUERRA' ||
-    upper === 'POLICIAL MILITAR' ||
-    upper === 'MILITAR' ||
-    upper === 'POLICIAL' ||
-    upper === 'EFETIVO' ||
-    upper === 'GRAD' ||
-    upper === 'POSTO' ||
-    upper === 'POSTO/GRAD' ||
-    upper === 'POSTO/GRADUACAO' ||
-    upper === 'MATRICULA' ||
-    upper === 'ID' ||
-    upper === 'ORD' ||
-    upper === 'ORDEM' ||
-    upper === 'NR' ||
-    upper === 'N'
-  ) {
+  const headerTokens = [
+    'NOME', 'NOME COMPLETO', 'NOME DO MILITAR', 'NOME DO POLICIAL', 'NOME DO SERVIDOR',
+    'NOME DE GUERRA', 'GUERRA', 'POLICIAL MILITAR', 'MILITAR', 'POLICIAL', 'EFETIVO',
+    'POSTO', 'GRAD', 'POSTO/GRAD', 'POSTO/GRADUACAO', 'P/G', 'GRADUACAO',
+    'MATRICULA', 'MAT', 'RE', 'ID', 'ORD', 'ORDEM', 'NR', 'Nº', 'ITEM',
+    'MES', 'MES PREVISTO', 'MES DE GOZO', 'MES DE FERIAS', 'PREVISAO', 'GOZO', 'PERIODO',
+    'ANO', 'ANO DE GOZO', 'EXERCICIO', 'AQUISITIVO', 'ANO REF', 'ANO BASE',
+    'DIAS', 'QTD DIAS', 'QUANTIDADE DE DIAS', 'DURACAO', 'PARCELA',
+    'SITUACAO', 'STATUS', 'CONDICAO', 'OBSERVACOES', 'OBS', 'SETOR', 'SUBUNIDADE', 'CIA'
+  ];
+
+  if (headerTokens.includes(upper)) {
     return true;
   }
 
@@ -166,6 +191,7 @@ function isHeaderOrExcludedName(val: string): boolean {
     upper.includes('ESCALA DE FERIAS') ||
     upper.includes('BOLETIM GERAL') ||
     upper.includes('RELATORIO') ||
+    upper.includes('QUADRO GERAL') ||
     upper.startsWith('QUADRO DE') ||
     upper.startsWith('TABELA DE')
   ) {
@@ -230,6 +256,279 @@ export async function parseExcelFerias(
     // Check if sheetName itself is a month name
     const sheetMonth = normalizeMes(sheetName);
     const sheetIsMonth = sheetName.toUpperCase().includes(sheetMonth.toUpperCase().slice(0, 3));
+
+    // -------------------------------------------------------------
+    // PRIORITY 1: ANNUAL MATRIX LAYOUT (Months as columns: JAN, FEV, MAR... SET... DEZ)
+    // -------------------------------------------------------------
+    const detectedMatrixCols = new Map<number, MesAno>();
+    let detectedMatrixHeaderRow = -1;
+    const maxScanRows = Math.min(jsonData.length, 25);
+
+    for (let r = 0; r < maxScanRows; r++) {
+      const row = jsonData[r];
+      if (!Array.isArray(row)) continue;
+      const rowCols = new Map<number, MesAno>();
+
+      row.forEach((cell, idx) => {
+        const str = cleanStr(cell);
+        if (!str) return;
+        const norm = normalizeSimple(str);
+
+        // Check if this header cell represents a month
+        for (const m of MESES_DO_ANO) {
+          const mNorm = normalizeSimple(m);
+          const prefix = mNorm.slice(0, 3); // JAN, FEV, MAR, ABR, MAI, JUN, JUL, AGO, SET, OUT, NOV, DEZ
+          if (
+            norm === prefix ||
+            norm === mNorm ||
+            norm === `MES ${prefix}` ||
+            norm === `MES ${mNorm}` ||
+            norm.startsWith(`${prefix}/`) ||
+            norm.endsWith(`/${prefix}`) ||
+            norm.startsWith(`${prefix}-`) ||
+            norm.startsWith(`${prefix} -`) ||
+            norm.startsWith(`${prefix} `) ||
+            norm.startsWith(`01/${prefix}`) ||
+            norm.startsWith(`1/${prefix}`)
+          ) {
+            rowCols.set(idx, m);
+            break;
+          }
+        }
+      });
+
+      if (rowCols.size >= 3) {
+        detectedMatrixHeaderRow = r;
+        rowCols.forEach((m, idx) => detectedMatrixCols.set(idx, m));
+        break;
+      }
+    }
+
+    if (detectedMatrixCols.size >= 3) {
+      // Find Name, Matrícula, and Posto column indices
+      const headerRow = jsonData[detectedMatrixHeaderRow] || [];
+      let mColNome = -1;
+      let mColMat = -1;
+      let mColPosto = -1;
+      let mColGuerra = -1;
+
+      headerRow.forEach((cell, idx) => {
+        if (detectedMatrixCols.has(idx)) return;
+        const s = normalizeSimple(cleanStr(cell));
+        if (s.includes('NOME DE GUERRA') || s === 'GUERRA') {
+          mColGuerra = idx;
+        } else if (
+          s === 'NOME' || 
+          s === 'NOME COMPLETO' || 
+          s === 'NOME DO MILITAR' || 
+          s === 'NOME DO POLICIAL' || 
+          s === 'POLICIAL' || 
+          s === 'MILITAR' || 
+          (s.includes('NOME') && !s.includes('GUERRA'))
+        ) {
+          if (mColNome === -1) mColNome = idx;
+        } else if (s.includes('MATRICULA') || s === 'MAT' || s === 'MAT.' || s === 'RE' || s === 'ID' || s === 'ORDEM' || s === 'ORD') {
+          if (mColMat === -1) mColMat = idx;
+        } else if (s === 'POSTO' || s === 'GRAD' || s === 'POSTO/GRAD' || s === 'POSTO/GRADUACAO' || s === 'P/G' || s === 'GRADUACAO') {
+          if (mColPosto === -1) mColPosto = idx;
+        }
+      });
+
+      // If mColNome not detected by header text, scan data rows for the column with full names
+      if (mColNome === -1) {
+        const votes = new Map<number, number>();
+        const sampleLimit = Math.min(jsonData.length, detectedMatrixHeaderRow + 30);
+        for (let r = detectedMatrixHeaderRow + 1; r < sampleLimit; r++) {
+          const row = jsonData[r];
+          if (!Array.isArray(row)) continue;
+          row.forEach((cell, idx) => {
+            if (detectedMatrixCols.has(idx) || idx === mColMat || idx === mColPosto) return;
+            const s = cleanStr(cell);
+            if (s.length >= 8 && /^[A-Za-zÀ-ÿ\s\.\-']+$/.test(s) && !isHeaderOrExcludedName(s) && detectMes(s) === null) {
+              const words = s.split(/\s+/).filter(w => w.length >= 2);
+              if (words.length >= 2) {
+                votes.set(idx, (votes.get(idx) || 0) + 1);
+              }
+            }
+          });
+        }
+        let maxV = 0;
+        votes.forEach((cnt, idx) => {
+          if (cnt > maxV) {
+            maxV = cnt;
+            mColNome = idx;
+          }
+        });
+      }
+
+      // If mColMat not detected, scan for 4-7 digit numbers
+      if (mColMat === -1) {
+        const sampleLimit = Math.min(jsonData.length, detectedMatrixHeaderRow + 15);
+        for (let r = detectedMatrixHeaderRow + 1; r < sampleLimit; r++) {
+          const row = jsonData[r];
+          if (!Array.isArray(row)) continue;
+          row.forEach((cell, idx) => {
+            if (detectedMatrixCols.has(idx) || idx === mColNome) return;
+            const s = cleanStr(cell);
+            if (/^\d{4,7}(-\d)?$/.test(s.replace(/\s/g, ''))) {
+              mColMat = idx;
+            }
+          });
+          if (mColMat >= 0) break;
+        }
+      }
+
+      // If mColPosto not detected, scan for rank abbreviations
+      if (mColPosto === -1) {
+        const sampleLimit = Math.min(jsonData.length, detectedMatrixHeaderRow + 15);
+        for (let r = detectedMatrixHeaderRow + 1; r < sampleLimit; r++) {
+          const row = jsonData[r];
+          if (!Array.isArray(row)) continue;
+          row.forEach((cell, idx) => {
+            if (detectedMatrixCols.has(idx) || idx === mColNome || idx === mColMat) return;
+            const s = cleanStr(cell);
+            if (/^(SD|CB|[123]º?\s*SGT|TEN|CAP|MAJ|CEL|SUBTEN)/i.test(s)) {
+              mColPosto = idx;
+            }
+          });
+          if (mColPosto >= 0) break;
+        }
+      }
+
+      // Parse each soldier row in Matrix Layout
+      for (let r = detectedMatrixHeaderRow + 1; r < jsonData.length; r++) {
+        const row = jsonData[r];
+        if (!Array.isArray(row) || row.length === 0) continue;
+
+        let rawNome = mColNome >= 0 ? cleanStr(row[mColNome]) : '';
+        let rawMat = mColMat >= 0 ? cleanMatricula(row[mColMat]) : '';
+        let rawPosto = mColPosto >= 0 ? cleanStr(row[mColPosto]) : '';
+        let rawGuerra = mColGuerra >= 0 ? cleanStr(row[mColGuerra]) : '';
+
+        // Fallback row scans if missing
+        if (!rawNome) {
+          row.forEach((cell, idx) => {
+            if (detectedMatrixCols.has(idx) || idx === mColMat || idx === mColPosto) return;
+            const s = cleanStr(cell);
+            if (s.length >= 8 && /^[A-Za-zÀ-ÿ\s\.\-']+$/.test(s) && !isHeaderOrExcludedName(s) && detectMes(s) === null) {
+              const parts = s.split(/\s+/).filter(w => w.length >= 2);
+              if (parts.length >= 2 && !rawNome) {
+                rawNome = s;
+              }
+            }
+          });
+        }
+
+        if (!rawMat) {
+          row.forEach((cell, idx) => {
+            if (detectedMatrixCols.has(idx) || idx === mColNome) return;
+            const s = cleanStr(cell);
+            if (/^\d{4,7}(-\d)?$/.test(s.replace(/\s/g, '')) && !rawMat) {
+              rawMat = cleanMatricula(s);
+            }
+          });
+        }
+
+        if (!rawPosto) {
+          row.forEach((cell, idx) => {
+            if (detectedMatrixCols.has(idx) || idx === mColNome) return;
+            const s = cleanStr(cell);
+            if (/^(SD|CB|[123]º?\s*SGT|TEN|CAP|MAJ|CEL|SUBTEN)/i.test(s) && !rawPosto) {
+              rawPosto = s;
+            }
+          });
+        }
+
+        if (!rawNome && !rawMat) continue;
+        if (isHeaderOrExcludedName(rawNome)) continue;
+
+        // Clean numbering prefix from name if present: "1. DIANA AMORIM ROCHA" -> "DIANA AMORIM ROCHA"
+        rawNome = rawNome.replace(/^\s*\d+[\.\-\)]*\s*/, '').trim();
+        if (!rawNome || isHeaderOrExcludedName(rawNome)) continue;
+
+        // Safe cross-referencing with Efetivo database
+        const normRaw = normalizeSimple(rawNome);
+        const cleanRawMatDigits = cleanDigits(rawMat);
+
+        let matchedMilitar: EfetivoMilitar | undefined;
+        if (cleanRawMatDigits.length >= 4) {
+          matchedMilitar = efetivoList.find(m => cleanDigits(m.matricula) === cleanRawMatDigits);
+        }
+        if (!matchedMilitar && normRaw) {
+          matchedMilitar = efetivoList.find(m => normalizeSimple(m.nomeCompleto) === normRaw);
+        }
+        if (!matchedMilitar && normRaw) {
+          const rawParts = normRaw.split(/\s+/).filter(Boolean);
+          if (rawParts.length >= 2) {
+            const first = rawParts[0];
+            const last = rawParts[rawParts.length - 1];
+            if (first.length >= 3 && last.length >= 3) {
+              matchedMilitar = efetivoList.find(m => {
+                const mParts = normalizeSimple(m.nomeCompleto).split(/\s+/).filter(Boolean);
+                return mParts.length >= 2 && mParts[0] === first && mParts[mParts.length - 1] === last;
+              });
+            }
+          }
+        }
+
+        // CRITICAL: Always preserve the authentic full name from Excel!
+        const nomeCompleto = (rawNome && rawNome.length >= 4) ? rawNome : (matchedMilitar?.nomeCompleto || 'Militar');
+        const posto: PostoGraduacao = rawPosto ? normalizePosto(rawPosto) : (matchedMilitar?.postoGraduacao || 'Sd');
+        const nomeGuerra = rawGuerra || (matchedMilitar?.nomeGuerra || (rawNome ? rawNome.split(' ')[0] : 'Militar'));
+        const matricula = rawMat || matchedMilitar?.matricula || `PM-${Math.floor(1000 + Math.random() * 9000)}`;
+
+        // Check which month(s) this soldier is on vacation in this Matrix row
+        detectedMatrixCols.forEach((mMonth, colIdx) => {
+          const val = row[colIdx];
+          if (val === null || val === undefined) return;
+          const strVal = cleanStr(val).trim();
+          if (!strVal || strVal === '-' || strVal === '0' || strVal === '--' || strVal.toUpperCase() === 'NAO' || strVal.toUpperCase() === 'NÃO') return;
+
+          // A mark can be 'X', 'x', '30', '15', '20', dates, etc.
+          let dias = 30;
+          const parsedD = parseDias(strVal);
+          if (parsedD > 0 && parsedD <= 30) {
+            dias = parsedD;
+          }
+
+          monthsFound.add(mMonth);
+
+          let situacao: PrevisaoFerias['situacao'] = 'Prevista';
+          const now = new Date();
+          const currentYr = now.getFullYear();
+          const currentMIdx = now.getMonth();
+          const mesIdx = MESES_DO_ANO.indexOf(mMonth);
+
+          if (currentYear < currentYr) {
+            situacao = 'Concluída';
+          } else if (currentYear === currentYr) {
+            if (mesIdx < currentMIdx) {
+              situacao = 'Concluída';
+            } else if (mesIdx === currentMIdx) {
+              situacao = 'Em Gozo';
+            } else {
+              situacao = 'Prevista';
+            }
+          }
+
+          records.push({
+            id: `FERIAS-${matricula}-${mMonth}-${currentYear}-${records.length + 1}`,
+            matricula,
+            nome: nomeCompleto,
+            nomeGuerra,
+            posto,
+            ano: currentYear,
+            mesPrevisto: mMonth,
+            periodoDias: dias,
+            situacao,
+            observacao: strVal !== 'X' && strVal !== 'x' && strVal !== String(dias) ? strVal : undefined
+          });
+        });
+      }
+
+      // Matrix sheet processed completely, continue to next sheet
+      continue;
+    }
 
     // MODE 1: PRIORITY STANDARD EXCEL LAYOUT (User Specification)
     // Coluna F (index 5): Nome do militar
@@ -321,28 +620,37 @@ export async function parseExcelFerias(
           }
         }
 
-        // Cross-reference with Efetivo database
-        const upperNome = rawNome.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
-        let matchedMilitar = efetivoList.find(m => {
-          if (rawMat && cleanMatricula(m.matricula) === rawMat) return true;
-          const mNC = m.nomeCompleto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
-          if (mNC === upperNome) return true;
-          return false;
-        });
+        // Cross-reference with Efetivo database safely
+        // PRESERVE the real name from Excel (rawNome)! NEVER replace with a soldier matched by partial surname!
+        const normRaw = normalizeSimple(rawNome);
+        const cleanRawMatDigits = cleanDigits(rawMat);
 
-        if (!matchedMilitar) {
-          matchedMilitar = efetivoList.find(m => {
-            const mNC = m.nomeCompleto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
-            if (mNC.includes(upperNome) || upperNome.includes(mNC)) return true;
-            if (rawGuerra && m.nomeGuerra.toUpperCase() === rawGuerra.toUpperCase()) return true;
-            return false;
-          });
+        let matchedMilitar: EfetivoMilitar | undefined;
+        if (cleanRawMatDigits.length >= 4) {
+          matchedMilitar = efetivoList.find(m => cleanDigits(m.matricula) === cleanRawMatDigits);
+        }
+        if (!matchedMilitar && normRaw) {
+          matchedMilitar = efetivoList.find(m => normalizeSimple(m.nomeCompleto) === normRaw);
+        }
+        if (!matchedMilitar && normRaw) {
+          const rawParts = normRaw.split(/\s+/).filter(Boolean);
+          if (rawParts.length >= 2) {
+            const first = rawParts[0];
+            const last = rawParts[rawParts.length - 1];
+            if (first.length >= 3 && last.length >= 3) {
+              matchedMilitar = efetivoList.find(m => {
+                const mParts = normalizeSimple(m.nomeCompleto).split(/\s+/).filter(Boolean);
+                return mParts.length >= 2 && mParts[0] === first && mParts[mParts.length - 1] === last;
+              });
+            }
+          }
         }
 
-        const posto: PostoGraduacao = matchedMilitar?.postoGraduacao || (rawPosto ? normalizePosto(rawPosto) : 'Sd');
-        const nomeCompleto = matchedMilitar?.nomeCompleto || rawNome;
-        const nomeGuerra = matchedMilitar?.nomeGuerra || rawGuerra || (rawNome ? rawNome.split(' ')[0] : 'Militar');
-        const matricula = matchedMilitar?.matricula || rawMat || `PM-${Math.floor(1000 + Math.random() * 9000)}`;
+        const posto: PostoGraduacao = rawPosto ? normalizePosto(rawPosto) : (matchedMilitar?.postoGraduacao || 'Sd');
+        // ALWAYS use the rawNome from the Excel sheet if it has at least 4 characters!
+        const nomeCompleto = (rawNome && rawNome.length >= 4) ? rawNome : (matchedMilitar?.nomeCompleto || 'Militar');
+        const nomeGuerra = rawGuerra || matchedMilitar?.nomeGuerra || (rawNome ? rawNome.split(' ')[0] : 'Militar');
+        const matricula = rawMat || matchedMilitar?.matricula || `PM-${Math.floor(1000 + Math.random() * 9000)}`;
 
         // Determine situation
         let situacao: PrevisaoFerias['situacao'] = 'Prevista';
@@ -510,16 +818,38 @@ export async function parseExcelFerias(
         continue;
       }
 
-      let matchedMilitar = efetivoList.find(m => 
-        (rawMat && cleanMatricula(m.matricula) === rawMat) ||
-        (rawNome && m.nomeCompleto.toUpperCase().includes(upperNome)) ||
-        (rawNome && upperNome.includes(m.nomeGuerra.toUpperCase()))
-      );
+      // Safe matching with Efetivo database
+      const normRaw = normalizeSimple(rawNome);
+      const cleanRawMatDigits = cleanDigits(rawMat);
 
-      const posto: PostoGraduacao = matchedMilitar?.postoGraduacao || (rawPosto ? normalizePosto(rawPosto) : 'Sd');
-      const nomeCompleto = matchedMilitar?.nomeCompleto || rawNome;
-      const nomeGuerra = matchedMilitar?.nomeGuerra || (rawNome ? rawNome.split(' ')[0] : 'Militar');
-      const matricula = matchedMilitar?.matricula || rawMat || `PM-${Math.floor(1000 + Math.random() * 9000)}`;
+      let matchedMilitar: EfetivoMilitar | undefined;
+      if (cleanRawMatDigits.length >= 4) {
+        matchedMilitar = efetivoList.find(m => cleanDigits(m.matricula) === cleanRawMatDigits);
+      }
+      if (!matchedMilitar && normRaw) {
+        matchedMilitar = efetivoList.find(m => normalizeSimple(m.nomeCompleto) === normRaw);
+      }
+      if (!matchedMilitar && normRaw) {
+        const rawParts = normRaw.split(/\s+/).filter(Boolean);
+        if (rawParts.length >= 2) {
+          const first = rawParts[0];
+          const last = rawParts[rawParts.length - 1];
+          if (first.length >= 3 && last.length >= 3) {
+            matchedMilitar = efetivoList.find(m => {
+              const mParts = normalizeSimple(m.nomeCompleto).split(/\s+/).filter(Boolean);
+              return mParts.length >= 2 && mParts[0] === first && mParts[mParts.length - 1] === last;
+            });
+          }
+        }
+      }
+
+      const posto: PostoGraduacao = rawPosto ? normalizePosto(rawPosto) : (matchedMilitar?.postoGraduacao || 'Sd');
+      // ALWAYS preserve authentic full name from Excel!
+      const nomeCompleto = (rawNome && rawNome.length >= 4) ? rawNome : (matchedMilitar?.nomeCompleto || 'Militar');
+      const nomeGuerra = (rawNome && rawNome.length >= 4)
+        ? (matchedMilitar?.nomeGuerra || rawNome.split(' ')[0])
+        : (matchedMilitar?.nomeGuerra || 'Militar');
+      const matricula = rawMat || matchedMilitar?.matricula || `PM-${Math.floor(1000 + Math.random() * 9000)}`;
 
       let situacao: PrevisaoFerias['situacao'] = 'Prevista';
       if (colSituacao >= 0 && row[colSituacao]) {
