@@ -1,4 +1,4 @@
-import { pdfjsLib } from '../services/pdfWorkerSetup';
+import { pdfjsLib, safeGetPageTextContent } from '../services/pdfWorkerSetup';
 
 export interface MilitaryPerson {
   rank: string;
@@ -48,8 +48,9 @@ export async function parseEscalaPDF(file: File): Promise<ScaleData> {
     for (let p = 1; p <= maxPages; p++) {
       console.log(`PDF Parser: Analyzing page ${p}/${maxPages}...`);
       const page = await pdf.getPage(p);
-      const textContent = await page.getTextContent();
-      const items = textContent.items as any[];
+      const textContent = await safeGetPageTextContent(page);
+      const rawItems = (textContent.items || []) as any[];
+      const items = rawItems.filter(item => item && item.transform && Array.isArray(item.transform));
       
       console.log(`PDF Parser: Page ${p} text items:`, items.length);
 

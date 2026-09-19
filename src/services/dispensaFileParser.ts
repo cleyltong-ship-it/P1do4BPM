@@ -1,4 +1,4 @@
-import { pdfjsLib } from './pdfWorkerSetup';
+import { pdfjsLib, safeGetPageTextContent } from './pdfWorkerSetup';
 import { DispensaMedicaLTS, EfetivoMilitar, PostoGraduacao, TipoAfastamentoSaude } from '../types';
 import { normalizePosto } from './excelEfetivoParser';
 import Tesseract from 'tesseract.js';
@@ -109,8 +109,8 @@ export async function extractTextFromPdf(
   for (let i = 1; i <= Math.min(numPages, 5); i++) {
     onProgress?.(`Extraindo texto da página ${i} de ${numPages}...`);
     const page = await pdfDoc.getPage(i);
-    const content = await page.getTextContent();
-    const pageStrings = content.items
+    const content = await safeGetPageTextContent(page);
+    const pageStrings = (content.items || [])
       .map((item: any) => item.str || '')
       .filter((s: string) => s.trim().length > 0);
 

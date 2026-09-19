@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { pdfjsLib } from './pdfWorkerSetup';
+import { pdfjsLib, safeGetPageTextContent } from './pdfWorkerSetup';
 import { PrevisaoFerias, MesAno, PostoGraduacao, EfetivoMilitar, CategoriaEscalaFerias } from '../types';
 import { normalizePosto } from './excelEfetivoParser';
 
@@ -1050,10 +1050,11 @@ export async function parsePdfFerias(
 
   for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
     const page = await pdfDoc.getPage(pageNum);
-    const textContent = await page.getTextContent();
+    const textContent = await safeGetPageTextContent(page);
     
     // Assemble text lines by Y position
-    const items = textContent.items as any[];
+    const rawItems = (textContent.items || []) as any[];
+    const items = rawItems.filter(item => item && item.transform && Array.isArray(item.transform));
     if (!items || items.length === 0) continue;
 
     // Group items into lines

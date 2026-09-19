@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import { EfetivoMilitar, EscalaPdfResult, EscalaItemParsed, PostoGraduacao, EscalaTipo } from '../types';
 import { ensureUniqueIds } from './efetivoDatabase';
-import pdfjsLib from './pdfWorkerSetup';
+import pdfjsLib, { safeGetPageTextContent } from './pdfWorkerSetup';
 
 /**
  * Normalizes text: removes accents, trims, and converts to uppercase
@@ -855,16 +855,21 @@ export async function extractTextFromPdf(fileOrBuffer: File | ArrayBuffer): Prom
 
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
-    const textContent = await page.getTextContent();
+    const textContent = await safeGetPageTextContent(page);
     
     // Sort items top-to-bottom (Y descending) then left-to-right (X ascending)
-    const items = textContent.items as any[];
+    const rawItems = (textContent.items || []) as any[];
+    const items = rawItems.filter(item => item && (item.str !== undefined || item.hasEOL));
     items.sort((a, b) => {
-      const yDiff = b.transform[5] - a.transform[5];
+      const aY = (a.transform && a.transform[5] !== undefined) ? a.transform[5] : 0;
+      const bY = (b.transform && b.transform[5] !== undefined) ? b.transform[5] : 0;
+      const aX = (a.transform && a.transform[4] !== undefined) ? a.transform[4] : 0;
+      const bX = (b.transform && b.transform[4] !== undefined) ? b.transform[4] : 0;
+      const yDiff = bY - aY;
       if (Math.abs(yDiff) > 3.5) {
         return yDiff;
       }
-      return a.transform[4] - b.transform[4];
+      return aX - bX;
     });
 
     let lastY: number | null = null;
@@ -872,11 +877,11 @@ export async function extractTextFromPdf(fileOrBuffer: File | ArrayBuffer): Prom
     let pageText = '';
 
     for (const item of items) {
-      const text = item.str;
+      const text = item.str || '';
       if (!text && !item.hasEOL) continue;
 
-      const currentY = item.transform[5];
-      const currentX = item.transform[4];
+      const currentY = (item.transform && item.transform[5] !== undefined) ? item.transform[5] : (lastY ?? 0);
+      const currentX = (item.transform && item.transform[4] !== undefined) ? item.transform[4] : (lastX ?? 0);
 
       const isNewLine = 
         item.hasEOL || 
