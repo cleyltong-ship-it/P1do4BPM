@@ -305,7 +305,7 @@ export default function App() {
             className="flex items-center gap-3 cursor-pointer group shrink-0"
           >
             <img 
-              src="/brasao_4bpm.jpg" 
+              src="/brasao_4bpm.png" 
               alt="Brasão do 4º Batalhão de Polícia Militar" 
               className="w-10 h-12 sm:w-11 sm:h-13 object-contain drop-shadow-md group-hover:scale-105 transition-all shrink-0" 
             />

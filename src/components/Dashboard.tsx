@@ -152,7 +152,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {/* Brasão Oficial do 4º BPM ao lado do título */}
             <div className="shrink-0 group">
               <img 
-                src="/brasao_4bpm.jpg" 
+                src="/brasao_4bpm.png" 
                 alt="Brasão do 4º Batalhão de Polícia Militar" 
                 className="w-16 h-20 sm:w-20 sm:h-24 object-contain drop-shadow-2xl hover:scale-105 transition-transform" 
               />
