@@ -17,6 +17,7 @@ export interface ApiResponse<T = any> {
   error?: string;
   message?: string;
   isTokenNotConfigured?: boolean;
+  isSheetTabMissing?: boolean;
   status?: number;
 }
 
@@ -74,62 +75,136 @@ export async function fetchSpreadsheetData(overrideConfig?: Partial<ApiConfig>):
   const config = { ...getApiConfig(), ...overrideConfig };
   const targetUrl = config.url || DEFAULT_APPS_SCRIPT_URL;
 
-  // Build GET URL with action and token
-  const urlObj = new URL(targetUrl);
-  urlObj.searchParams.set('action', 'read');
-  if (config.token) {
-    urlObj.searchParams.set('token', config.token);
-    urlObj.searchParams.set('api_token', config.token);
+  try {
+    // Actions to attempt: the user's script accepts 'get' or 'list' (action 'read' is invalid)
+    const candidateActions = ['get', 'list', ''];
+
+  let lastJson: any = null;
+  let lastError = '';
+
+  for (const act of candidateActions) {
+    try {
+      const urlObj = new URL(targetUrl);
+      if (act) {
+        urlObj.searchParams.set('action', act);
+      }
+      if (config.token) {
+        urlObj.searchParams.set('token', config.token);
+        urlObj.searchParams.set('api_token', config.token);
+        urlObj.searchParams.set('key', config.token);
+      }
+
+      const response = await fetch(urlObj.toString(), {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json, text/plain, */*'
+        }
+      });
+
+      const text = await response.text();
+      let json: any = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        lastError = `Resposta da API não é JSON: ${text.slice(0, 100)}`;
+        continue;
+      }
+
+      lastJson = json;
+
+      // If token not configured
+      if (json.error === 'API_TOKEN não configurado.' || (json.error && json.error.toLowerCase().includes('api_token não configurado'))) {
+        return {
+          success: false,
+          error: 'API_TOKEN não configurado.',
+          isTokenNotConfigured: true,
+          message: 'A propriedade "API_TOKEN" não está definida no Google Apps Script associado à planilha.'
+        };
+      }
+
+      // If sheet tab "Efetivo" is missing in Google Spreadsheet
+      if (json.error && json.error.toLowerCase().includes('efetivo')) {
+        return {
+          success: false,
+          error: 'A aba "Efetivo" não foi encontrada na sua planilha Google.',
+          isSheetTabMissing: true,
+          message: 'Token aceito pelo script! Porém, a sua planilha precisa ter uma aba (página) chamada "Efetivo". Renomeie a aba principal da planilha para "Efetivo" para carregar e sincronizar.'
+        };
+      }
+
+      // If invalid action, try next action
+      if (json.error && json.error.toLowerCase().includes('ação inválida')) {
+        continue;
+      }
+
+      if (json.success === false && json.error) {
+        return {
+          success: false,
+          error: json.error,
+          isTokenNotConfigured: json.error.toLowerCase().includes('token')
+        };
+      }
+
+      // We got a successful response or a data list!
+      break;
+    } catch (fetchErr: any) {
+      lastError = fetchErr.message || 'Falha de conexão com a API da planilha.';
+    }
   }
 
-  try {
-    const response = await fetch(urlObj.toString(), {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json, text/plain, */*'
-      }
-    });
+  if (!lastJson) {
+    return {
+      success: false,
+      error: lastError || 'Não foi possível obter resposta válida da API do Google Sheets.'
+    };
+  }
 
-    const text = await response.text();
-    let json: any = null;
-    try {
-      json = JSON.parse(text);
-    } catch {
-      // Sometimes Apps Script returns HTML or plain text
-      return {
-        success: false,
-        error: `Resposta da API inválida ou não JSON: ${text.slice(0, 150)}`
-      };
+  if (lastJson.error && lastJson.error.toLowerCase().includes('efetivo')) {
+    return {
+      success: false,
+      error: 'A aba "Efetivo" não foi encontrada na sua planilha Google.',
+      isSheetTabMissing: true,
+      message: 'Token aceito com sucesso! Para carregar e salvar dados, sua planilha Google precisa de uma aba (página) chamada "Efetivo". Renomeie a aba principal para "Efetivo".'
+    };
+  }
+
+  const json = lastJson;
+
+  // Extract list of soldiers/rows from response
+  // The sheet API might return: { success: true, data: [...] } or array directly or { rows: [...] } or { soldiers: [...] }
+  let rawList: any[] = [];
+  if (Array.isArray(json)) {
+    rawList = json;
+  } else if (Array.isArray(json.data)) {
+    rawList = json.data;
+  } else if (Array.isArray(json.rows)) {
+    rawList = json.rows;
+  } else if (Array.isArray(json.soldiers)) {
+    rawList = json.soldiers;
+  } else if (Array.isArray(json.items)) {
+    rawList = json.items;
+  } else if (Array.isArray(json.militares)) {
+    rawList = json.militares;
+  }
+
+  // Handle array of arrays if first row is header
+  if (rawList.length > 1 && Array.isArray(rawList[0]) && typeof rawList[0][0] === 'string') {
+    const headers = rawList[0].map((h: any) => String(h).trim().toLowerCase());
+    const nameIdx = headers.findIndex((h: string) => h.includes('nome') || h.includes('militar') || h.includes('soldado'));
+    
+    if (nameIdx !== -1) {
+      rawList = rawList.slice(1).map(row => {
+        if (!Array.isArray(row)) return row;
+        const obj: any = { name: row[nameIdx], services: [] };
+        row.forEach((cell: any, idx: number) => {
+          if (idx !== nameIdx && cell) {
+            obj.services.push(cell);
+          }
+        });
+        return obj;
+      });
     }
-
-    if (json.error === 'API_TOKEN não configurado.') {
-      return {
-        success: false,
-        error: 'API_TOKEN não configurado.',
-        isTokenNotConfigured: true,
-        message: 'A propriedade "API_TOKEN" não está definida no Google Apps Script associado à planilha.'
-      };
-    }
-
-    if (json.success === false && json.error) {
-      return {
-        success: false,
-        error: json.error,
-        isTokenNotConfigured: json.error.toLowerCase().includes('token')
-      };
-    }
-
-    // Extract list of soldiers/rows from response
-    // The sheet API might return: { success: true, data: [...] } or array directly or { rows: [...] } or { soldiers: [...] }
-    const rawList = Array.isArray(json) 
-      ? json 
-      : Array.isArray(json.data) 
-        ? json.data 
-        : Array.isArray(json.rows) 
-          ? json.rows 
-          : Array.isArray(json.soldiers) 
-            ? json.soldiers 
-            : [];
+  }
 
     const currentYear = new Date().getFullYear();
     const today = new Date();
@@ -241,7 +316,8 @@ export async function addFutureExtraToSpreadsheet(
   const isoDate = `${year}-${month}-${day}`;
 
   const payload = {
-    action: 'addExtra',
+    action: 'create',
+    actionType: 'create',
     date: isoDate,
     dataExtra: formattedDate,
     data: isoDate,
@@ -256,12 +332,21 @@ export async function addFutureExtraToSpreadsheet(
       observacao: note
     })),
     soldiers: soldiers.map(s => s.name),
-    names: soldiers.map(s => s.name)
+    names: soldiers.map(s => s.name),
+    nome: soldiers.map(s => s.name).join(', '),
+    militar: soldiers.map(s => s.name).join(', ')
   };
 
   try {
-    // We send Content-Type text/plain so Google Apps Script doesn't fail preflight CORS
-    const response = await fetch(targetUrl, {
+    // Try POST with action=create in query string and payload
+    const urlObj = new URL(targetUrl);
+    urlObj.searchParams.set('action', 'create');
+    if (config.token) {
+      urlObj.searchParams.set('token', config.token);
+      urlObj.searchParams.set('api_token', config.token);
+    }
+
+    const response = await fetch(urlObj.toString(), {
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8',
@@ -282,12 +367,21 @@ export async function addFutureExtraToSpreadsheet(
       };
     }
 
-    if (json.error === 'API_TOKEN não configurado.') {
+    if (json.error === 'API_TOKEN não configurado.' || (json.error && json.error.toLowerCase().includes('api_token não configurado'))) {
       return {
         success: false,
         isTokenNotConfigured: true,
         error: 'API_TOKEN não configurado.',
         message: 'A atribuição foi salva localmente no aplicativo, mas o script da planilha Google precisa do API_TOKEN configurado em suas propriedades para persistir na nuvem.'
+      };
+    }
+
+    if (json.error && json.error.toLowerCase().includes('efetivo')) {
+      return {
+        success: false,
+        isSheetTabMissing: true,
+        error: 'A aba "Efetivo" não foi encontrada na sua planilha Google.',
+        message: 'A atribuição foi salva localmente! Para que seja gravada na planilha Google, renomeie a aba principal da planilha para "Efetivo".'
       };
     }
 

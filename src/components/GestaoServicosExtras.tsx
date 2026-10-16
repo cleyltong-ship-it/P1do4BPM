@@ -67,7 +67,7 @@ export const GestaoServicosExtras: React.FC<GestaoServicosExtrasProps> = ({
   const [copiedNotification, setCopiedNotification] = useState(false);
 
   // Google Sheets API states
-  const [apiStatus, setApiStatus] = useState<'connected' | 'token_needed' | 'error' | 'loading' | 'idle'>('idle');
+  const [apiStatus, setApiStatus] = useState<'connected' | 'token_needed' | 'tab_needed' | 'error' | 'loading' | 'idle'>('idle');
   const [apiMessage, setApiMessage] = useState<string | null>(null);
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
@@ -157,6 +157,12 @@ export const GestaoServicosExtras: React.FC<GestaoServicosExtrasProps> = ({
         setApiMessage('API_TOKEN não configurado no Apps Script');
         if (isManual) {
           showToast('A planilha retornou "API_TOKEN não configurado". Clique no botão da Planilha para instruções.', 'warning');
+        }
+      } else if (res.isSheetTabMissing) {
+        setApiStatus('tab_needed');
+        setApiMessage('Aba "Efetivo" não encontrada na planilha Google');
+        if (isManual) {
+          showToast('Chave validada! Renomeie a aba da sua planilha para "Efetivo" para carregar os dados.', 'warning');
         }
       } else {
         setApiStatus('error');
@@ -792,6 +798,7 @@ export const GestaoServicosExtras: React.FC<GestaoServicosExtrasProps> = ({
               <Database size={14} className={
                 apiStatus === 'connected' ? 'text-emerald-600' :
                 apiStatus === 'token_needed' ? 'text-amber-600' :
+                apiStatus === 'tab_needed' ? 'text-sky-600' :
                 apiStatus === 'loading' ? 'text-blue-600 animate-pulse' :
                 'text-ink/60'
               } />
@@ -800,11 +807,13 @@ export const GestaoServicosExtras: React.FC<GestaoServicosExtrasProps> = ({
                 "text-[10px] px-2 py-0.5 rounded-full font-bold uppercase",
                 apiStatus === 'connected' ? "bg-emerald-100 text-emerald-800" :
                 apiStatus === 'token_needed' ? "bg-amber-100 text-amber-900" :
+                apiStatus === 'tab_needed' ? "bg-sky-100 text-sky-900" :
                 apiStatus === 'loading' ? "bg-blue-100 text-blue-800" :
                 "bg-slate-200 text-ink/70"
               )}>
                 {apiStatus === 'connected' ? 'Conectada' :
                  apiStatus === 'token_needed' ? 'Token Pendente' :
+                 apiStatus === 'tab_needed' ? 'Aba Efetivo' :
                  apiStatus === 'loading' ? 'Sincronizando...' :
                  'Conectar'}
               </span>
@@ -861,6 +870,27 @@ export const GestaoServicosExtras: React.FC<GestaoServicosExtrasProps> = ({
           )}
         </div>
       </div>
+
+      {/* Tab Efetivo Guidance Warning Banner */}
+      {apiStatus === 'tab_needed' && (
+        <div className="bg-sky-50 border-l-4 border-sky-500 p-4 rounded-xl flex items-start justify-between gap-3 shadow-xs">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="text-sky-600 shrink-0 mt-0.5" size={18} />
+            <div className="text-xs">
+              <h4 className="font-bold text-sky-950">Chave validada! Renomeie a aba da sua planilha para "Efetivo"</h4>
+              <p className="text-sky-900/90 mt-0.5 leading-relaxed">
+                O token <strong>000</strong> foi reconhecido com sucesso pelo Google Apps Script. Para que o script consiga ler os militares e salvar os extras, a sua planilha Google precisa ter a aba com o nome exato <strong>Efetivo</strong>.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsConfigModalOpen(true)}
+            className="px-3 py-1.5 bg-sky-700 hover:bg-sky-800 text-white rounded-lg text-xs font-bold transition-colors shrink-0 cursor-pointer shadow-xs"
+          >
+            Como Renomear a Aba
+          </button>
+        </div>
+      )}
 
       {/* Token Guidance Warning Banner if API_TOKEN is needed */}
       {apiStatus === 'token_needed' && (

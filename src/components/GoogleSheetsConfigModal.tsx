@@ -18,7 +18,7 @@ interface GoogleSheetsConfigModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSyncSuccess?: () => void;
-  currentStatus: 'connected' | 'token_needed' | 'error' | 'loading' | 'idle';
+  currentStatus: 'connected' | 'token_needed' | 'tab_needed' | 'error' | 'loading' | 'idle';
   statusMessage?: string | null;
 }
 
@@ -31,7 +31,12 @@ export const GoogleSheetsConfigModal: React.FC<GoogleSheetsConfigModalProps> = (
 }) => {
   const [config, setConfig] = useState(getApiConfig());
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string; isTokenNotConfigured?: boolean } | null>(null);
+  const [testResult, setTestResult] = useState<{ 
+    success: boolean; 
+    message: string; 
+    isTokenNotConfigured?: boolean;
+    isSheetTabMissing?: boolean;
+  } | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
 
@@ -56,8 +61,9 @@ export const GoogleSheetsConfigModal: React.FC<GoogleSheetsConfigModalProps> = (
       } else {
         setTestResult({
           success: false,
-          message: res.error || 'Erro ao conectar à API da planilha.',
-          isTokenNotConfigured: res.isTokenNotConfigured
+          message: res.message || res.error || 'Erro ao conectar à API da planilha.',
+          isTokenNotConfigured: res.isTokenNotConfigured,
+          isSheetTabMissing: res.isSheetTabMissing
         });
       }
     } catch (err: any) {
@@ -177,26 +183,44 @@ export const GoogleSheetsConfigModal: React.FC<GoogleSheetsConfigModalProps> = (
             </div>
           )}
 
+          {/* Guide on Tab "Efetivo" */}
+          <div className="bg-sky-50/80 border border-sky-200/90 rounded-xl p-4 space-y-2.5">
+            <h4 className="font-bold text-sky-950 text-xs flex items-center gap-1.5">
+              <Info size={14} className="text-sky-700" />
+              Importante: A planilha precisa de uma aba chamada "Efetivo"
+            </h4>
+            <p className="text-[11px] text-sky-900/90 leading-relaxed">
+              O script do Google Apps Script busca os dados e grava os serviços extras especificamente na aba com o nome <strong>Efetivo</strong>:
+            </p>
+            <ol className="list-decimal list-inside space-y-1.5 text-[11px] text-sky-950 leading-relaxed">
+              <li>Abra sua planilha Google no navegador.</li>
+              <li>Na barra inferior de abas (onde diz <em>"Página1"</em>, <em>"Sheet1"</em> ou outro nome), clique com o botão direito na aba desejada.</li>
+              <li>Selecione <strong>Renomear</strong> e digite exatamente: <span className="font-bold font-mono bg-white px-1.5 py-0.5 rounded border border-sky-300">Efetivo</span></li>
+              <li>A planilha deve conter colunas com os nomes dos militares (ex: <em>Nome</em>, <em>Posto</em>, <em>Data</em> ou colunas de datas).</li>
+              <li>Volte nesta janela e clique em <strong>Testar Conexão</strong>!</li>
+            </ol>
+          </div>
+
           {/* Guide on setting API_TOKEN in Google Apps Script */}
           <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-4 space-y-2">
             <h4 className="font-bold text-amber-950 text-xs flex items-center gap-1.5">
               <Info size={14} className="text-amber-700" />
-              Como resolver o erro "API_TOKEN não configurado"?
+              Como configurar a chave "API_TOKEN" no Google Apps Script?
             </h4>
             <ol className="list-decimal list-inside space-y-1 text-[11px] text-amber-900/90 leading-relaxed">
-              <li>Abra sua planilha Google e vá em <strong>Extensões &gt; Apps Script</strong>.</li>
+              <li>Na sua planilha Google, acesse o menu <strong>Extensões &gt; Apps Script</strong>.</li>
               <li>No menu à esquerda do editor, clique em <strong>Configurações do Projeto</strong> (ícone de engrenagem ⚙️).</li>
               <li>Role até a seção <strong>Propriedades do script</strong> e clique em <strong>Adicionar propriedade do script</strong>.</li>
               <li>Defina a propriedade:
                 <div className="mt-1 font-mono text-[10px] bg-white/80 p-2 rounded-lg border border-amber-200">
                   <strong>Propriedade:</strong> API_TOKEN<br />
-                  <strong>Valor:</strong> (defina uma senha ou chave de sua escolha, e informe-a no campo acima)
+                  <strong>Valor:</strong> 000 (ou o token digitado no campo acima)
                 </div>
               </li>
               <li>Clique em <strong>Salvar propriedades do script</strong>.</li>
             </ol>
             <p className="text-[10px] text-amber-800/80 italic pt-1">
-              💡 Enquanto o token não for configurado na planilha, o aplicativo armazena as atribuições de extras localmente para que seu trabalho nunca seja perdido!
+              💡 As atribuições de extras também ficam salvas localmente no navegador para garantir que seu trabalho nunca seja interrompido.
             </p>
           </div>
         </div>
