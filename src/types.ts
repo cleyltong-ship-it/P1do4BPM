@@ -64,8 +64,9 @@ export interface EscalaPdfResult {
 export interface SoldierService {
   name: string;
   lastService: Date | null;
-  history: { day: number; month: number; original: string }[];
+  history: { day: number; month: number; original: string; year?: number; isFuture?: boolean }[];
   allServices: Date[];
+  futureExtras?: { date: Date; original: string; note?: string }[];
 }
 
 export interface MilitaryPerson {
